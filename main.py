@@ -29,7 +29,7 @@ def main():
     # Model parameters
     parser.add_argument('--model', type=str, default="ShallowCapsNet",
                         help="Name of the model to be used")
-    parser.add_argument('--model-args', nargs="+", default=[1, 16], type=int,
+    parser.add_argument('--model-args', nargs="+", default=[28, 1, 10, 16], type=int,
                         help="arguments for the model instantiation")
     parser.add_argument('--decoder', type=str, default="FCDecoder")
     parser.add_argument('--decoder-args', nargs="+", default=[16, 28 * 28], type=int,
