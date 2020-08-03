@@ -24,7 +24,7 @@ def main():
     global args
 
     # Setting the hyper parameters
-    parser = argparse.ArgumentParser(description='Q-CapsNets framework')
+    parser = argparse.ArgumentParser(description='Q-CapsNets framework', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     # Model parameters
     parser.add_argument('--model', type=str, default="ShallowCapsNet",
@@ -75,7 +75,7 @@ def main():
 
     # Q-CapsNets parameters
     parser.add_argument('--accuracy-tolerance', type=float, default=2,
-                        help="accuracy tolerance expressed in percentage (e.g., 20 for 20% tolerance)")
+                        help="accuracy tolerance expressed in percentage (e.g., 20 for 20%% tolerance)")
     parser.add_argument('--quantization_method', type=str, default="stochastic_rounding",
                         help="String with the name of the quantization method to use")
     parser.add_argument('--memory-budget', type=float, default=200,
