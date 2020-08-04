@@ -36,7 +36,7 @@ $ python main.py -h
   - `log-interval`: during the training, information on losses and accuracy are displayed every log-interval steps. 
   - `regularization-scale`: multiplication factor to scale down the regularization loss of the decoder. 
   - `decay-steps`, `decay-rate`: the learning rate is decreased exponentially according to the formula below and these two parameters control the decayment. 
-  ![equation](![equation](https://latex.codecogs.com/gif.latex?lr%20%3D%20lr_0%20%5Ccdot%20%5Cmbox%7Bdecay%5C_rate%7D%20%5E%20%7B%5Cfrac%7B%5Cmbox%7Btraining%5C_step%7D%7D%7B%5Cmbox%7Bdecay%5C_steps%7D%7D%7D)
+  ![equation](https://latex.codecogs.com/gif.latex?lr%20%3D%20lr_0%20%5Ccdot%20%5Cmbox%7Bdecay%5C_rate%7D%20%5E%20%7B%5Cfrac%7B%5Cmbox%7Btraining%5C_step%7D%7D%7B%5Cmbox%7Bdecay%5C_steps%7D%7D%7D)
   - `hard-training`: toggles hard training after half of the training epochs. 
   - `test-batch-size`: batch size used during testing 
   - `visible-gpus`: set the number of the GPU to be used. Set to '-1' to use the CPU. 
