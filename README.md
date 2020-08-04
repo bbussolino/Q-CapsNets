@@ -93,11 +93,11 @@ https://drive.google.com/file/d/1vmQzlrD3O0r_vyogzxoGBf1MKYfwcU9L/view?usp=shari
 The available weights are listed in the table below. 
 | Filename | Model | Dataset | Accuracy |
 |----------|-------|---------|----------|
-|ShallowCapsNet_mnist_top.pt|ShallowCapsNet|MNIST|  |
-|ShallowCapsNet_fashionmnist_top.pt|ShallowCapsNet|FashionMNIST|  |
-|DeepCaps_mnist_top.pt|DeepCaps|MNIST|
-|DeepCaps_fashionmnist_top.pt|DeepCaps|FashionMNIST|
-|DeepCaps_cifar10_top.pt|DeepCaps|CIFAR10|
+|ShallowCapsNet_mnist_top.pt|ShallowCapsNet|MNIST| 99.67% |
+|ShallowCapsNet_fashionmnist_top.pt|ShallowCapsNet|FashionMNIST| 92.79% |
+|DeepCaps_mnist_top.pt|DeepCaps|MNIST| 99.75% |
+|DeepCaps_fashionmnist_top.pt|DeepCaps|FashionMNIST| 95.08% |
+|DeepCaps_cifar10_top.pt|DeepCaps|CIFAR10| 91.26% |
 
 Assuming you want to use the ShallowCapsNet weights for MNIST dataset and that they are stored in the folder "./pre_trained_weights/", you need to use the arguments: 
 ```sh 
