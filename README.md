@@ -88,7 +88,7 @@ DeepCaps for SVHN:
 ```
 ### Arguments for usage with pre-trained weights 
 You can download the pre-trained weights at the following link: 
-https://drive.google.com/file/d/1vmQzlrD3O0r_vyogzxoGBf1MKYfwcU9L/view?usp=sharing
+https://drive.google.com/drive/folders/1mGFXFtzoFp_voVsfAWbOc9EDdwsg4I5Z?usp=sharing
 
 The available weights are listed in the table below. 
 | Filename | Model | Dataset | Accuracy |
