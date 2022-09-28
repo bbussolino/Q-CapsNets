@@ -3,8 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 
+from characterization_utils import CharacterizationUtils
 
-class Conv2d_ReLU(nn.Module):
+
+class Conv2d_ReLU(nn.Module, CharacterizationUtils):
     """ Convolutional layer followed by ReLU activation
 
         Methods:
@@ -20,6 +22,7 @@ class Conv2d_ReLU(nn.Module):
                 stride: stride
         """
         super(Conv2d_ReLU, self).__init__()
+        CharacterizationUtils.__init__(self)
         self.conv = nn.Conv2d(in_channels=in_channels,
                               out_channels=out_channels,
                               kernel_size=kernel_size,
@@ -34,13 +37,18 @@ class Conv2d_ReLU(nn.Module):
             Returns:
                 out_conv: output Tensor of shape [batch_size, out_channels, ho, wo]
         """
+        if CharacterizationUtils.characterize: 
+            self.update_max(x, "input")
         out_conv = self.conv(x)  # Convolution
         out_conv = self.relu(out_conv)  # Activation
+        
+        if CharacterizationUtils.characterize: 
+            self.update_max(out_conv, "output")
 
         return out_conv
 
 
-class Conv2d_BN_ReLU(nn.Module):
+class Conv2d_BN_ReLU(nn.Module, CharacterizationUtils):
     """ Convolutional layer followed by Batch Normalization and ReLU activation
 
         Methods:
@@ -59,6 +67,7 @@ class Conv2d_BN_ReLU(nn.Module):
                 eps: value for numerical stability of the Batch Normalization (default = 0.001)
         """
         super(Conv2d_BN_ReLU, self).__init__()
+        CharacterizationUtils.__init__(self)
         self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                               stride=stride, padding=padding)
         self.batchnorm = nn.BatchNorm2d(num_features=out_channels, momentum=momentum, eps=eps)
@@ -72,9 +81,13 @@ class Conv2d_BN_ReLU(nn.Module):
             Returns:
                 out_conv: output Tensor of shape [batch_size, out_channels, ho, wo]
         """
+        if CharacterizationUtils.characterize: 
+            self.update_max(x, "input")
         out_conv = self.conv(x)
         out_conv = self.relu(out_conv)
         out_conv = self.batchnorm(out_conv)
+        if CharacterizationUtils.characterize: 
+            self.update_max(out_conv, "output")
 
         return out_conv
 
@@ -133,9 +146,13 @@ def update_routing(votes, logits, iterations, bias):
 
     else:  # [bs, ci, co, no, ho, wo]
         votes_trans = votes.permute(3, 0, 1, 2, 4, 5).contiguous()  # [no, bs, ci, co, ho, wo]
-
+    
+    characterizations = [torch.Tensor([0.]).to(logits.device) for _ in range(4*iterations)]
     for iteration in range(iterations):
         route = F.softmax(logits, dim=2)
+        if CharacterizationUtils.characterize:
+            characterizations[iteration*4+0] = torch.max(torch.max(torch.abs(route)), characterizations[iteration*4+0])
+        
         preactivate_unrolled = route * votes_trans
         if dimensions == 4:
             preactivate_trans = preactivate_unrolled.permute(1, 2, 3, 0).contiguous()  # bs, ci, co, no
@@ -143,13 +160,20 @@ def update_routing(votes, logits, iterations, bias):
             preactivate_trans = preactivate_unrolled.permute(1, 2, 3, 0, 4, 5).contiguous()  # bs, ci, co, no, ho, wo
 
         preactivate = preactivate_trans.sum(dim=1) + bias  # bs, co, no, (ho, wo)
+        if CharacterizationUtils.characterize:
+            characterizations[iteration*4+1] = torch.max(torch.max(torch.abs(preactivate)), characterizations[iteration*4+1])
+            
         activation = squash(preactivate, dim=2)  # bs, co, no, (ho, wo)
+        if CharacterizationUtils.characterize:
+            characterizations[iteration*4+2] = torch.max(torch.max(torch.abs(activation)), characterizations[iteration*4+2])
 
         act_3d = activation.unsqueeze(1)  # bs, 1, co, no, (ho,wo)
         distances = (votes * act_3d).sum(dim=3)  # bs, ci, co, ho, wo
         logits = logits + distances
-
-    return activation
+        if CharacterizationUtils.characterize:
+            characterizations[iteration*4+3] = torch.max(torch.max(torch.abs(logits)), characterizations[iteration*4+3])
+            
+    return activation, characterizations
 
 
 def update_routing_6D_DeepCaps(votes, logits, iterations, bias):  # differs from above
@@ -179,21 +203,30 @@ def update_routing_6D_DeepCaps(votes, logits, iterations, bias):  # differs from
     bs, ci, co, no, ho, wo = votes.size()
 
     # Perform different permutations depending on the number of dimensions of the vector (4 or 6)
+    characterizations = [torch.Tensor([0.]).to(logits.device) for _ in range(4*iterations)]
     for iteration in range(iterations):
         logits_temp = logits.view(bs, ci, -1)  # bs, ci, co*ho*wo
         route_temp = F.softmax(logits_temp, dim=2)  # bs, ci, co*ho*wo
         route = route_temp.view(bs, ci, co, ho, wo)  # bs, ci, co, ho, wo
+        if CharacterizationUtils.characterize:
+            characterizations[iteration*4+0] = torch.max(torch.max(torch.abs(route)), characterizations[iteration*4+0])
         preactivate_unrolled = route.unsqueeze(3) * votes  # bs, ci, co, no, ho, wo
         preactivate = preactivate_unrolled.sum(1) + bias  # bs, co, no, ho, wo
+        if CharacterizationUtils.characterize:
+            characterizations[iteration*4+1] = torch.max(torch.max(torch.abs(preactivate)), characterizations[iteration*4+1])
         activation = squash(preactivate, dim=2)  # bs, co, no, ho, wo
+        if CharacterizationUtils.characterize:
+            characterizations[iteration*4+2] = torch.max(torch.max(torch.abs(activation)), characterizations[iteration*4+2]) 
         act_3d = activation.unsqueeze(1)  # bs, 1, co, no, ho, wo
         distances = (act_3d * votes).sum(3)  # bs, ci, co, no, ho, wo --> bs, ci, co, ho, wo
         logits = logits + distances
+        if CharacterizationUtils.characterize:
+            characterizations[iteration*4+3] = torch.max(torch.max(torch.abs(logits)), characterizations[iteration*4+3]) 
 
-    return activation
+    return activation, characterizations
 
 
-class ConvPixelToCapsules(nn.Module):
+class ConvPixelToCapsules(nn.Module, CharacterizationUtils):
     """ Convolutional layer that transforms the traditional feature maps in capsules
 
     Methods:
@@ -212,6 +245,7 @@ class ConvPixelToCapsules(nn.Module):
             iterations: number of iterations of the dynamic routing algorithm
         """
         super(ConvPixelToCapsules, self).__init__()
+        CharacterizationUtils.__init__(self)
 
         self.ci = ci
         self.ni = ni
@@ -237,7 +271,9 @@ class ConvPixelToCapsules(nn.Module):
             activation: output Tensor of shape [bs, co, no, ho, wo]
         """
         bs, ci, ni, hi, wi = x.size()
-
+        
+        if CharacterizationUtils.characterize: 
+            self.update_max(x, "input")
         # Reshape input and perform convolution to compute \hat{u_{j|i}} = votes
         input_reshaped = x.view(bs * ci, ni, hi, wi)
         votes = self.conv3d(input_reshaped)  # bs*ci, co*no, ho, wo
@@ -246,13 +282,23 @@ class ConvPixelToCapsules(nn.Module):
         # Reshape votes, initialize logits and perform dynamic routing
         votes_reshaped = votes.view(bs, ci, self.co, self.no, ho, wo).contiguous()
         logits = votes_reshaped.new(bs, ci, self.co, ho, wo).zero_()
+        
+        if CharacterizationUtils.characterize: 
+            self.update_max(votes, "votes")
 
-        activation = update_routing(votes_reshaped, logits, self.iterations, self.bias)
+        activation, characterizations = update_routing(votes_reshaped, logits, self.iterations, self.bias)
+        
+        if CharacterizationUtils.characterize: 
+            for iteration in range(self.iterations):
+                self.update_max(characterizations[iteration*4+0], f"post_softmax_{iteration}")
+                self.update_max(characterizations[iteration*4+1], f"pre_squash_{iteration}")
+                self.update_max(characterizations[iteration*4+2], f"output_{iteration}")
+                self.update_max(characterizations[iteration*4+3], f"pre_softmax_{iteration}")
 
         return activation
 
 
-class Capsules(nn.Module):
+class Capsules(nn.Module, CharacterizationUtils):
     """ Capsule layer
 
         Methods:
@@ -268,6 +314,7 @@ class Capsules(nn.Module):
             iterations: number of iterations of the dynamic routing algorithm
         """
         super(Capsules, self).__init__()
+        CharacterizationUtils.__init__(self)
 
         self.weight = nn.Parameter(torch.randn(ci, ni, co * no))
         self.bias = nn.Parameter(torch.zeros(co, no))
@@ -289,18 +336,31 @@ class Capsules(nn.Module):
             activation: output Tensor of shape [bs, co, no]
         """
         bs = x.size(0)
+        
+        if CharacterizationUtils.characterize: 
+            self.update_max(x, "input")
 
         # Compute \hat{u_{j|i}} = votes
         votes = (x.unsqueeze(3) * self.weight).sum(dim=2).view(-1, self.ci, self.co, self.no)
+        
+        if CharacterizationUtils.characterize: 
+            self.update_max(votes, "votes")
 
         # Initialize logits and perform dynamic routing
         logits = votes.new(bs, self.ci, self.co).zero_()
-        activation = update_routing(votes, logits, self.iterations, self.bias)
+        activation, characterizations = update_routing(votes, logits, self.iterations, self.bias)
 
+        if CharacterizationUtils.characterize: 
+            for iteration in range(self.iterations):
+                self.update_max(characterizations[iteration*4+0], f"post_softmax_{iteration}")
+                self.update_max(characterizations[iteration*4+1], f"pre_squash_{iteration}")
+                self.update_max(characterizations[iteration*4+2], f"output_{iteration}")
+                self.update_max(characterizations[iteration*4+3], f"pre_softmax_{iteration}")
+            
         return activation
 
 
-class Conv2DCaps(nn.Module): 
+class Conv2DCaps(nn.Module, CharacterizationUtils): 
     """ 2D Convolutional layer used in DeepCaps (no dynamic routing)
 
         Methods:
@@ -317,6 +377,7 @@ class Conv2DCaps(nn.Module):
             padding: padding
         """
         super(Conv2DCaps, self).__init__()
+        CharacterizationUtils.__init__(self)
 
         self.ci = ci  # number of capsules in input layer
         self.ni = ni  # atoms of capsules in input layer
@@ -341,6 +402,9 @@ class Conv2DCaps(nn.Module):
             Returns:
                 output: Tensor of shape [bathc_size, co, no, ho, wo]
         """
+        if CharacterizationUtils.characterize: 
+            self.update_max(x, "input")
+        
         bs, ci, ni, hi, wi = x.size()
         input_reshaped = x.view(bs, ci * ni, hi, wi)
 
@@ -348,13 +412,19 @@ class Conv2DCaps(nn.Module):
         _, _, ho, wo = output_reshaped.size()
 
         output = output_reshaped.view(bs, self.co, self.no, ho, wo)  # bs, co, no, ho, wo
+        
+        if CharacterizationUtils.characterize: 
+            self.update_max(output, "pre_squash")
 
         output = squash(output, dim=2)
+        
+        if CharacterizationUtils.characterize: 
+            self.update_max(output, "output")
 
         return output
 
 
-class Conv3DCaps(nn.Module):
+class Conv3DCaps(nn.Module, CharacterizationUtils):
     """ 3D convolutional capsule layer with dynamic routing
 
         Methods:
@@ -372,6 +442,7 @@ class Conv3DCaps(nn.Module):
             iterations: number of iterations of the dynamic routing algorithm
         """
         super(Conv3DCaps, self).__init__()
+        CharacterizationUtils.__init__(self)
         self.ci = ci
         self.ni = ni
         self.co = co
@@ -400,6 +471,8 @@ class Conv3DCaps(nn.Module):
                 activation: Tensor of shape [batch_size, co, no, ho, wo]
         """
         bs, ci, ni, hi, wi = x.size()
+        if CharacterizationUtils.characterize: 
+            self.update_max(x, "input")
 
         input_tensor_reshaped = x.view(bs, 1, ci * ni, hi, wi)
 
@@ -407,10 +480,19 @@ class Conv3DCaps(nn.Module):
         _, _, _, ho, wo = conv.size()
 
         votes = conv.permute(0, 2, 1, 3, 4).contiguous().view(bs, ci, self.co, self.no, ho, wo)
+        if CharacterizationUtils.characterize: 
+            self.update_max(votes, "votes")
 
         logits = votes.new(bs, ci, self.co, ho, wo).zero_()  # bs, ci, co, ho, wo
 
-        activation = update_routing_6D_DeepCaps(votes, logits, self.iterations, self.bias)
+        activation, characterizations = update_routing_6D_DeepCaps(votes, logits, self.iterations, self.bias)
+        
+        if CharacterizationUtils.characterize: 
+            for iteration in range(self.iterations):
+                self.update_max(characterizations[iteration*4+0], f"post_softmax_{iteration}")
+                self.update_max(characterizations[iteration*4+1], f"pre_squash_{iteration}")
+                self.update_max(characterizations[iteration*4+2], f"output_{iteration}")
+                self.update_max(characterizations[iteration*4+3], f"pre_softmax_{iteration}")
 
         return activation  # bs, co, no, ho, wo
 

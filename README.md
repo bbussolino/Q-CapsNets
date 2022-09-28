@@ -80,7 +80,7 @@ DeepCaps for FashionMNIST:
 ```
 DeepCaps for CIFAR10: 
 ```sh 
---model DeepCaps --model-args 64 3 10 32 -decoder ConvDecoder64 --decoder-args 32 3 --dataset cifar10
+--model DeepCaps --model-args 64 3 10 32 --decoder ConvDecoder64 --decoder-args 32 3 --dataset cifar10
 ```
 DeepCaps for SVHN: 
 ```sh 
