@@ -101,10 +101,10 @@ def main():
     model_dataset_combinations.append(["DeepCaps", [28, 1, 10, 32], "ConvDecoder28", [32, 1], "fashion-mnist", "./trained_models/DeepCaps_fashionmnist_top.pt", 32.2])
     model_dataset_combinations.append(["DeepCaps", [64, 3, 10, 32], "ConvDecoder64", [32, 3], "cifar10", "./trained_models/DeepCaps_cifar10_top.pt", 50.98])
     
-    possible_std_multipliers = [10000, 8, 7, 6, 5]
+    possible_std_multipliers = [10000, 8, 7, 6] #, 5]
     possible_acc_tolerance = [0.2, 0.5, 1]
     possible_mem_budget_reduction = [2, 3, 4, 5, 6, 7, 8, 10]
-    possible_roundings = ["round_to_nearest", "stochastic_rounding", "truncation"]
+    possible_roundings = ["round_to_nearest", "stochastic_rounding"] #, "truncation"]
     
     f = open("multiple_tests.txt", "w+")
     
@@ -120,6 +120,11 @@ def main():
                         args.accuracy_tolerance = acc_tolerance 
                         args.memory_budget = baseline_mem / mem_budget_reduction
                         args.quantization_method = rounding 
+                        
+                        if args.model == "ShallowCapsNet": 
+                            args.test_batch_size = 512
+                        else: 
+                            args.test_batch_size = 256
                     
     
                         ################### REPEAT THIS #########################

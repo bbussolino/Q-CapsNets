@@ -1,3 +1,5 @@
-trained_models/
 __pycache__/
 data/
+trained_models/*_accuracy.pt
+trained_models/*_memory.pt
+trained_models/*_satisfied.pt
