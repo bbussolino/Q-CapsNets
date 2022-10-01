@@ -102,7 +102,20 @@ def main():
         max_values["primary"] = model.primary.max_values_dict 
         max_values["digit"] = model.digit.max_values_dict 
         
-        torch.save(max_values, os.path.join("trained_models", "ShallowCapsNet_"+args.dataset+"_top_actsf.pt"))
+        # torch.save(max_values, os.path.join("trained_models", "ShallowCapsNet_"+args.dataset+"_top_actsf.pt"))
+        scaling_factors = [] 
+        scaling_factors.append(max_values["conv"]["input"].item())
+        scaling_factors.append(max_values["conv"]["output"].item())
+        print(max_values["primary"])
+        for l in ["primary", "digit"]: 
+            for key, value in max_values[l].items(): 
+                if key == "input": 
+                    continue
+                scaling_factors.append(value.item())
+            
+                
+        scaling_factors = torch.Tensor(scaling_factors)
+        torch.save(scaling_factors, os.path.join("trained_models", "ShallowCapsNet_"+args.dataset+"_top_actsf.pt"))
         
     elif args.model == "DeepCaps":
         max_values = OrderedDict()
@@ -125,7 +138,36 @@ def main():
         max_values["block4_lskip"] = model.block4.l_skip.max_values_dict 
         max_values["capsLayer"] = model.capsLayer.max_values_dict 
         
-        torch.save(max_values, os.path.join("trained_models", "DeepCaps_"+args.dataset+"_top_actsf.pt"))
+        #torch.save(max_values, os.path.join("trained_models", "DeepCaps_"+args.dataset+"_top_actsf.pt"))
+        
+        scaling_factors = []
+        scaling_factors.append(max_values["conv1"]["input"].item())
+        scaling_factors.append(max_values["conv1"]["output"].item())
+        for i in range(1, 5): #1,2,3,4
+            for j in ["l1", "l2", "l3", "lskip"]: 
+                if i == 4 and j == "lskip": 
+                    continue
+                scaling_factors.append(max_values[f"block{i}_{j}"]["pre_squash"].item())
+                scaling_factors.append(max_values[f"block{i}_{j}"]["output"].item())
+                
+        scaling_factors.append(max_values["block4_lskip"]["votes"].item())
+        for i in range(0, 3): 
+            scaling_factors.append(max_values["block4_lskip"][f"post_softmax_{i}"].item())
+            scaling_factors.append(max_values["block4_lskip"][f"pre_squash_{i}"].item())
+            scaling_factors.append(max_values["block4_lskip"][f"output_{i}"].item())
+            scaling_factors.append(max_values["block4_lskip"][f"pre_softmax_{i}"].item())
+            
+            
+        scaling_factors.append(max_values["capsLayer"]["votes"].item())
+        for i in range(0, 3): 
+            scaling_factors.append(max_values["capsLayer"][f"post_softmax_{i}"].item())
+            scaling_factors.append(max_values["capsLayer"][f"pre_squash_{i}"].item())
+            scaling_factors.append(max_values["capsLayer"][f"output_{i}"].item())
+            scaling_factors.append(max_values["capsLayer"][f"pre_softmax_{i}"].item())
+            
+        scaling_factors = torch.Tensor(scaling_factors)
+        torch.save(scaling_factors, os.path.join("trained_models", "DeepCaps_"+args.dataset+"_top_actsf.pt"))
+
     
     else: 
         raise ValueError("Not supported network")

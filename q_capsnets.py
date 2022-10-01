@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import torch
 import copy
 import sys
@@ -9,7 +10,7 @@ from quantization_methods import *
 from quantized_models import *
 
 
-def quantized_test(model, num_classes, data_loader, quantization_function, quantization_bits,
+def quantized_test(model, num_classes, data_loader, quantization_function, scaling_factors, quantization_bits,
                    quantization_bits_routing):
     """ Function to test the accuracy of the quantized models
 
@@ -40,8 +41,11 @@ def quantized_test(model, num_classes, data_loader, quantization_function, quant
             target = target.to(device)
             target_one_hot = target_one_hot.to(device)
 
+        # input quantization 
+        data = quantization_function(data, scaling_factors[0], quantization_bits[0])
+
         # Output predictions
-        output = model(data, quantization_function, quantization_bits, quantization_bits_routing)
+        output = model(data, quantization_function, scaling_factors[1:], quantization_bits, quantization_bits_routing)
 
         # Sum up batch loss
         m_loss = \
@@ -69,7 +73,7 @@ def quantized_test(model, num_classes, data_loader, quantization_function, quant
 
 
 def qcapsnets(model, model_parameters, full_precision_filename, num_classes, data_loader, top_accuracy,
-              accuracy_tolerance, memory_budget, quantization_scheme):
+              accuracy_tolerance, memory_budget, quantization_scheme, std_multiplier=100):
     """ Q-CapsNets framework - Quantization
 
         Args:
@@ -91,6 +95,16 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     model_quant_class = getattr(sys.modules[__name__], model)
     model_quant_original = model_quant_class(*model_parameters)
     model_quant_original.load_state_dict(torch.load(full_precision_filename))
+    
+    weights_scale_factors_tmp = torch.load(full_precision_filename[:-3]+'_sf.pt', map_location=torch.device('cpu'))
+    weights_scale_factors = OrderedDict()
+    for key, value in weights_scale_factors_tmp.items(): 
+        weights_scale_factors[key] = torch.min(value[0], value[1]*std_multiplier)
+    
+    
+    # Load scaling factors 
+    act_scale_factors = torch.load(full_precision_filename[:-3]+'_actsf.pt', map_location=torch.device('cpu'))
+    act_scale_factors = act_scale_factors.tolist()
 
     # Move the model to GPU if available
     if torch.cuda.device_count() > 0:
@@ -114,11 +128,22 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     step1_reduction = 5 / 100 * acc_reduction
     step1_min_acc = top_accuracy - step1_reduction
 
-    print("Full-precision accuracy: ", top_accuracy, "%")
-    print("Minimum quantized accuracy: ", minimum_accuracy, "%")
-    print("Memory budget: ", memory_budget, "MB")
-    print("Quantization method: ", quantization_scheme)
-    print("\n")
+    print(f"Full-precision accuracy: {top_accuracy:.2f} %")
+    print(f"Minimum quantized accuracy: {minimum_accuracy:.2f} %")
+    print(f"Memory budget: {memory_budget:.2f} MB")
+    print(f"Quantization method: {quantization_scheme}")
+    
+    
+    tot_numer_of_weights = 0 
+    for i, c in enumerate(model_quant_original.named_children()):
+        for p in c[1].named_parameters():
+            tot_numer_of_weights += p[1].numel()
+            
+    tot_memory_b = tot_numer_of_weights * 32 
+    tot_memory_B = tot_memory_b // 8 
+    tot_memory_MB = tot_memory_B / 2**20
+    
+    print(f"Baseline memory footprint (MB): {tot_memory_MB:.2f} MB")
 
     # STEP 1: Layer-Uniform quantization of weights and activations
     print("STEP 1")
@@ -140,17 +165,19 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
 
         step1_act_bits_f = []     # list with the quantization bits for the activations
         step1_dr_bits_f = []      # list with the quantization bits for the dynamic routing
-        for c in quantized_model_temp.children():
+        for c in quantized_model_temp.named_children():
             step1_act_bits_f.append(quantization_bits)
-            if c.capsule_layer:
-                if c.dynamic_routing:
+            if c[1].capsule_layer:
+                if c[1].dynamic_routing:
                     step1_dr_bits_f.append(quantization_bits)
-            for p in c.parameters():
-                with torch.no_grad():
-                    quantization_function_weights(p, quantization_bits)      # Quantize the weights
+            for p in c[1].named_parameters():
+                if not "batchnorm" in p[0]:
+                    with torch.no_grad():
+                        quantization_function_weights(p[1], weights_scale_factors['.'.join([c[0],p[0]])].item(), quantization_bits)      # Quantize the weights
         # test with quantized weights and activations
         acc_temp = quantized_test(quantized_model_temp, num_classes, data_loader,
-                                  quantization_function_activations, step1_act_bits_f, step1_dr_bits_f)
+                                  quantization_function_activations, act_scale_factors, step1_act_bits_f, step1_dr_bits_f)
+        print(quantization_bits, step1_act_bits_f, step1_dr_bits_f, acc_temp)
         del quantized_model_temp
         return acc_temp
 
@@ -186,7 +213,7 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
                         int(step1_bit_search[-1] + abs(step1_bit_search[-1] - step1_bit_search[-2]) / 2))
     else:
         step1_bits = 32
-        step1_acc = step1_acc_list[1]
+        step1_acc = step1_acc_list[0]
 
     # Create the lists of bits ofSTEP 1
     step1_act_bits = []
@@ -217,12 +244,13 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
         number_of_weights_inlayers.append(param_intra_layer)
     number_of_blocks = len(number_of_weights_inlayers)
 
-    memory_budget_bits = memory_budget * 8000000      # From MB to bits
+    memory_budget_bits = memory_budget * 8 * 2**20      # From MB to bits
     minimum_mem_required = np.sum(number_of_weights_inlayers)
 
     if memory_budget_bits < minimum_mem_required:
-        raise ValueError("The memory budget can not be satisfied, increase it to",
-                         minimum_mem_required / 8000000, " MB at least")
+        #raise ValueError("The memory budget can not be satisfied, increase it to",
+        #                 minimum_mem_required / 8 / 2**20, " MB at least")
+        return f"ERROR The memory budget can not be satisfied, increase it to {minimum_mem_required / 8 / 2**20} MB at least"
 
     # Compute the number of bits that satisfy the memory budget.
     # First try with [N, N-1, N-2, N-3, N-4, N-4, ...].
@@ -258,6 +286,9 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
             break
         else:
             decrease_amount = decrease_amount - 1
+            
+    if any([w<=0 for w in step2_weight_bits]): 
+        return f"ERROR Zero bits in weight bits" 
 
     # lists of bitwidths for activations and dynamic routing at STEP 1
     step2_act_bits = copy.deepcopy(step1_act_bits)
@@ -265,12 +296,15 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
 
     # Quantizeed the weights
     model_memory = copy.deepcopy(model_quant_original)
-    for i, c in enumerate(model_memory.children()):
-        for p in c.parameters():
-            with torch.no_grad():
-                quantization_function_weights(p, step2_weight_bits[i])
+    for i, c in enumerate(model_memory.named_children()):
+        for p in c[1].named_parameters():
+            if not "batchnorm" in p[0]:
+                with torch.no_grad():
+                    quantization_function_weights(p[1], weights_scale_factors['.'.join([c[0],p[0]])].item(), step2_weight_bits[i])
+
     step2_acc = quantized_test(model_memory, num_classes, data_loader,
-                               quantization_function_activations, step2_act_bits, step2_dr_bits)
+                               quantization_function_activations, act_scale_factors, step2_act_bits, step2_dr_bits)
+    print(step2_weight_bits, step2_act_bits, step2_dr_bits, step2_acc)
 
     print("STEP 2 output: ")
     print("\t Weight bits: \t\t", step2_weight_bits)
@@ -303,7 +337,8 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
         for l in range(0, len(step3a_act_bits)):
             while True:
                 step3a_acc = quantized_test(model_memory, num_classes, data_loader,
-                                            quantization_function_activations, step3a_act_bits, step3a_dr_bits)
+                                            quantization_function_activations, act_scale_factors, step3a_act_bits, step3a_dr_bits)
+                print(step3a_act_bits, step3a_dr_bits, step3a_acc)
                 if step3a_acc >= step3A_min_acc:
                     step3a_act_bits[l:] = list(np.add(step3a_act_bits[l:], -1))
                     for x in range(len(layers_dr_position)):
@@ -315,7 +350,8 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
                     break
 
         step3a_acc = quantized_test(model_memory, num_classes, data_loader,
-                                    quantization_function_activations, step3a_act_bits, step3a_dr_bits)
+                                    quantization_function_activations, act_scale_factors, step3a_act_bits, step3a_dr_bits)
+        print(step3a_act_bits, step3a_dr_bits, step3a_acc)
 
         print("STEP 3A output: ")
         print("\t Weight bits: \t\t", step3a_weight_bits)
@@ -339,15 +375,17 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
                     if c.dynamic_routing_quantization:
                         dynamic_routing_quantization.append(True)
                     else:
-                        dynamic_routing_quantization.append(False)
+                        dynamic_routing_quantization.append(True)
         dr_quantization_pos = [pos for pos, val in enumerate(dynamic_routing_quantization) if val]
 
         # new set of bits only if dynamic routing is performed
         dr_quantization_bits = [step4a_dr_bits[x] for x in dr_quantization_pos]
         for l in range(0, len(dr_quantization_bits)):
+            print(f"l {l}")
             while True:
                 step4a_acc = quantized_test(model_memory, num_classes, data_loader,
-                                            quantization_function_activations, step4a_act_bits, step4a_dr_bits)
+                                            quantization_function_activations, act_scale_factors, step4a_act_bits, step4a_dr_bits)
+                print(step4a_act_bits, step4a_dr_bits, step4a_acc)
                 if step4a_acc >= minimum_accuracy:
                     dr_quantization_bits[l:] = list(np.add(dr_quantization_bits[l:], -1))
                     # update the whole vector step4a_dr_bits
@@ -361,7 +399,8 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
                     break
 
         step4a_acc = quantized_test(model_memory, num_classes, data_loader,
-                                    quantization_function_activations, step4a_act_bits, step4a_dr_bits)
+                                    quantization_function_activations, act_scale_factors, step4a_act_bits, step4a_dr_bits)
+        print(step4a_act_bits, step4a_dr_bits, step4a_acc)
 
         print("STEP 4A output: ")
         print("\t Weight bits: \t\t", step4a_weight_bits)
@@ -378,6 +417,14 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
         print("\t Activation bits: \t\t", step4a_act_bits)
         print("\t Dynamic Routing bits: \t\t", step4a_dr_bits)
         print("Model-satisfied accuracy: ", step4a_acc)
+        
+        assert len(number_of_weights_inlayers) == len(step4a_weight_bits)
+        final_weight_memory_b = sum([number_of_weights_inlayers[i]*step4a_weight_bits[i] for i in range(len(number_of_weights_inlayers))])
+        final_weight_memory_B = final_weight_memory_b / 8 
+        wmem_reduction = tot_memory_b / final_weight_memory_b
+        print(f"Weight memory reduction: {wmem_reduction:.2f}x")
+        
+        return step4a_weight_bits, step4a_act_bits, step4a_dr_bits, step4a_acc, wmem_reduction
 
     else:
         # BRANCH B - STEP 3B  - layer-wise quantization of the weights
@@ -387,33 +434,38 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
         step3b_dr_bits = copy.deepcopy(step1_dr_bits)
 
         model_accuracy = copy.deepcopy(model_quant_original)
-        for i, c in enumerate(model_accuracy.children()):
-            for p in c.parameters():
-                with torch.no_grad():
-                    quantization_function_weights(p, step3b_weight_bits[i])
+        for i, c in enumerate(model_accuracy.named_children()):
+            for p in c[1].named_parameters():
+                if not "batchnorm" in p[0]:
+                    with torch.no_grad():
+                        quantization_function_weights(p[1], weights_scale_factors['.'.join([c[0],p[0]])].item(), step3b_weight_bits[i])
 
         for l in range(0, len(step3b_weight_bits)):
             while True:
                 step3b_acc = quantized_test(model_accuracy, num_classes, data_loader,
-                                            quantization_function_activations, step3b_act_bits, step3b_dr_bits)
+                                            quantization_function_activations, act_scale_factors, step3b_act_bits, step3b_dr_bits)
+                print(step3b_weight_bits, step3b_act_bits, step3b_dr_bits, step3b_acc)
                 if step3b_acc >= minimum_accuracy:
                     step3b_weight_bits[l:] = list(np.add(step3b_weight_bits[l:], -1))
                     model_accuracy = copy.deepcopy(model_quant_original)
-                    for i, c in enumerate(model_accuracy.children()):
-                        for p in c.parameters():
-                            with torch.no_grad():
-                                quantization_function_weights(p, step3b_weight_bits[i])
+                    for i, c in enumerate(model_accuracy.named_children()):
+                        for p in c[1].named_parameters():
+                            if not "batchnorm" in p[0]:
+                                with torch.no_grad():
+                                    quantization_function_weights(p[1], weights_scale_factors['.'.join([c[0],p[0]])].item(), step3b_weight_bits[i])
                 else:
                     step3b_weight_bits[l:] = list(np.add(step3b_weight_bits[l:], +1))
                     model_accuracy = copy.deepcopy(model_quant_original)
-                    for i, c in enumerate(model_accuracy.children()):
-                        for p in c.parameters():
-                            with torch.no_grad():
-                                quantization_function_weights(p, step3b_weight_bits[i])
+                    for i, c in enumerate(model_accuracy.named_children()):
+                        for p in c[1].named_parameters():
+                            if not "batchnorm" in p[0]:
+                                with torch.no_grad():
+                                    quantization_function_weights(p[1], weights_scale_factors['.'.join([c[0],p[0]])].item(), step3b_weight_bits[i])
                     break
 
         step3b_acc = quantized_test(model_accuracy, num_classes, data_loader,
-                                    quantization_function_activations, step3b_act_bits, step3b_dr_bits)
+                                    quantization_function_activations, act_scale_factors, step3b_act_bits, step3b_dr_bits)
+        print(step3b_weight_bits, step3b_act_bits, step3b_dr_bits, step3b_acc)
 
         print("STEP 3B output: ")
         print("\t Weight bits: \t\t", step3b_weight_bits)
@@ -433,8 +485,20 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
         print("\n")
         quantized_filename = full_precision_filename[:-3] + '_quantized_accuracy.pt'
         torch.save(model_accuracy.state_dict(), quantized_filename)
-        print("Model-memory stored in ", quantized_filename)
+        print("Model-accuracy stored in ", quantized_filename)
         print("\t Weight bits: \t\t", step3b_weight_bits)
         print("\t Activation bits: \t\t", step3b_act_bits)
         print("\t Dynamic Routing bits: \t\t", step3b_dr_bits)
         print("Model_accuracy accuracy: ", step3b_acc)
+        
+        assert len(number_of_weights_inlayers) == len(step2_weight_bits)
+        final_weight_memory_b = sum([number_of_weights_inlayers[i]*step2_weight_bits[i] for i in range(len(number_of_weights_inlayers))])
+        wmem_reduction_mem = tot_memory_b / final_weight_memory_b
+        print(f"Weight memory reduction - mem: {wmem_reduction_mem:.2f}x")
+        
+        assert len(number_of_weights_inlayers) == len(step3b_weight_bits)
+        final_weight_memory_b = sum([number_of_weights_inlayers[i]*step3b_weight_bits[i] for i in range(len(number_of_weights_inlayers))])
+        wmem_reduction_acc = tot_memory_b / final_weight_memory_b
+        print(f"Weight memory reduction - acc: {wmem_reduction_acc:.2f}x")
+        
+        return step2_weight_bits, step2_act_bits, step2_dr_bits, step2_acc, wmem_reduction_mem, step3b_weight_bits, step3b_act_bits, step3b_dr_bits, step3b_acc, wmem_reduction_acc

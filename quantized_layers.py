@@ -28,7 +28,7 @@ class Conv2d_ReLU(nn.Module):
 
         self.capsule_layer = False
 
-    def forward(self, x, quantization_function, quantization_bits):
+    def forward(self, x, quantization_function, scaling_factor, quantization_bits):
         """ forward method
 
             Args:
@@ -40,7 +40,7 @@ class Conv2d_ReLU(nn.Module):
         """
         out_conv = self.conv(x)
         out_conv = self.relu(out_conv)
-        out_conv = quantization_function(out_conv, quantization_bits)
+        out_conv = quantization_function(out_conv, scaling_factor, quantization_bits)
 
         return out_conv
 
@@ -70,7 +70,7 @@ class Conv2d_BN_ReLU(nn.Module):
         self.relu = nn.ReLU()
         self.capsule_layer = False
 
-    def forward(self, x, quantization_function, quantization_bits):
+    def forward(self, x, quantization_function, scaling_factor, quantization_bits):
         """ forward method
 
             Args:
@@ -83,7 +83,7 @@ class Conv2d_BN_ReLU(nn.Module):
         out_conv = self.conv(x)
         out_conv = self.relu(out_conv)
         out_conv = self.batchnorm(out_conv)
-        out_conv = quantization_function(out_conv, quantization_bits)
+        out_conv = quantization_function(out_conv, scaling_factor, quantization_bits)
 
         return out_conv
 
@@ -102,7 +102,7 @@ def squash(x, dim=2):
 
 
 def update_routing(votes, logits, iterations, bias,
-                   quantization_function, quantization_bits, quantization_bits_routing):
+                   quantization_function, scaling_factors, quantization_bits, quantization_bits_routing):
     """ Dynamic routing algorithm   (paper: Dynamic Routing Between Capsules, Sabour et al., 2017)
 
     Args:
@@ -149,7 +149,7 @@ def update_routing(votes, logits, iterations, bias,
 
     for iteration in range(iterations):
         route = F.softmax(logits, dim=2)
-        route = quantization_function(route, quantization_bits)
+        route = quantization_function(route, scaling_factors[iteration*4+0], quantization_bits)
 
         preactivate_unrolled = route * votes_trans
         if dimensions == 4:
@@ -158,20 +158,20 @@ def update_routing(votes, logits, iterations, bias,
             preactivate_trans = preactivate_unrolled.permute(1, 2, 3, 0, 4, 5).contiguous()  # bs, ci, co, no, ho, wo
 
         preactivate = preactivate_trans.sum(dim=1) + bias  # bs, co, no, (ho, wo)
-        preactivate = quantization_function(preactivate, quantization_bits_routing)
+        preactivate = quantization_function(preactivate, scaling_factors[iteration*4+1], quantization_bits_routing)
         activation = squash(preactivate, dim=2)  # bs, co, no, (ho, wo)
-        activation = quantization_function(activation, quantization_bits)
+        activation = quantization_function(activation, scaling_factors[iteration*4+2], quantization_bits)
 
         act_3d = activation.unsqueeze(1)  # bs, 1, co, no, (ho,wo)
         distances = (votes * act_3d).sum(dim=3)  # bs, ci, co, ho, wo
         logits = logits + distances
-        logits = quantization_function(logits, quantization_bits_routing)
+        logits = quantization_function(logits, scaling_factors[iteration*4+3], quantization_bits_routing)
 
     return activation
 
 
 def update_routing_6D_DeepCaps(votes, logits, iterations, bias,
-                               quantization_function, quantization_bits, quantization_bits_routing):
+                               quantization_function, scaling_factors, quantization_bits, quantization_bits_routing):
     """ Dynamic routing algorithm used in DeepCaps for the convolutional capsule layers
 
     Args:
@@ -205,16 +205,16 @@ def update_routing_6D_DeepCaps(votes, logits, iterations, bias,
         logits_temp = logits.view(bs, ci, -1)  # bs, ci, co*ho*wo
         route_temp = F.softmax(logits_temp, dim=2)  # bs, ci, co*ho*wo
         route = route_temp.view(bs, ci, co, ho, wo)  # bs, ci, co, ho, wo
-        route = quantization_function(route, quantization_bits)
+        route = quantization_function(route, scaling_factors[iteration*4+0], quantization_bits)
         preactivate_unrolled = route.unsqueeze(3) * votes  # bs, ci, co, no, ho, wo
         preactivate = preactivate_unrolled.sum(1) + bias  # bs, co, no, ho, wo
-        preactivate = quantization_function(preactivate, quantization_bits_routing)
+        preactivate = quantization_function(preactivate, scaling_factors[iteration*4+1], quantization_bits_routing)
         activation = squash(preactivate, dim=2)  # bs, co, no, ho, wo
-        activation = quantization_function(activation, quantization_bits)
+        activation = quantization_function(activation, scaling_factors[iteration*4+2], quantization_bits)
         act_3d = activation.unsqueeze(1)  # bs, 1, co, no, ho, wo
         distances = (act_3d * votes).sum(3)  # bs, ci, co, no, ho, wo --> bs, ci, co, ho, wo
         logits = logits + distances
-        logits = quantization_function(logits, quantization_bits_routing)
+        logits = quantization_function(logits, scaling_factors[iteration*4+3], quantization_bits_routing)
 
     return activation
 
@@ -259,7 +259,7 @@ class ConvPixelToCapsules(nn.Module):
 
         self.bias = torch.nn.Parameter(torch.zeros(co, no, 1, 1))
 
-    def forward(self, x, quantization_function, quantization_bits, quantization_bits_routing):
+    def forward(self, x, quantization_function, scaling_factors, quantization_bits, quantization_bits_routing):
         """ forward method
 
         Args:
@@ -275,7 +275,7 @@ class ConvPixelToCapsules(nn.Module):
         # Reshape input and perform convolution to compute \hat{u_{j|i}} = votes
         input_reshaped = x.view(bs * ci, ni, hi, wi)
         votes = self.conv3d(input_reshaped)  # bs*ci, co*no, ho, wo
-        votes = quantization_function(votes, quantization_bits)
+        votes = quantization_function(votes, scaling_factors[0], quantization_bits)
         _, _, ho, wo = votes.size()
 
         # Reshape votes, initialize logits and perform dynamic routing
@@ -283,7 +283,7 @@ class ConvPixelToCapsules(nn.Module):
         logits = votes_reshaped.new(bs, ci, self.co, ho, wo).zero_()
 
         activation = update_routing(votes_reshaped, logits, self.iterations, self.bias,
-                                    quantization_function, quantization_bits, quantization_bits_routing)
+                                    quantization_function, scaling_factors[1:self.iterations*4+1], quantization_bits, quantization_bits_routing)
 
         return activation
 
@@ -320,7 +320,7 @@ class Capsules(nn.Module):
         if iterations > 1:
             self.dynamic_routing_quantization = True
 
-    def forward(self, x, quantization_function, quantization_bits, quantization_bits_routing):
+    def forward(self, x, quantization_function, scaling_factors, quantization_bits, quantization_bits_routing):
         """ forward method
 
         Args:
@@ -335,12 +335,12 @@ class Capsules(nn.Module):
 
         # Compute \hat{u_{j|i}} = votes
         votes = (x.unsqueeze(3) * self.weight).sum(dim=2).view(-1, self.ci, self.co, self.no)
-        votes = quantization_function(votes, quantization_bits)
+        votes = quantization_function(votes, scaling_factors[0], quantization_bits)
 
         # Initialize logits and perform dynamic routing
         logits = votes.new(bs, self.ci, self.co).zero_()
         activation = update_routing(votes, logits, self.iterations, self.bias,
-                                    quantization_function, quantization_bits, quantization_bits_routing)
+                                    quantization_function, scaling_factors[1:self.iterations*4+1], quantization_bits, quantization_bits_routing)
 
         return activation
 
@@ -380,7 +380,7 @@ class Conv2DCaps(nn.Module):
         init.xavier_uniform_(self.conv.weight)
         init.zeros_(self.conv.bias)
 
-    def forward(self, x, quantization_function, quantization_bits):
+    def forward(self, x, quantization_function, scaling_factors, quantization_bits):
         """ forward method
 
             Args:
@@ -397,10 +397,10 @@ class Conv2DCaps(nn.Module):
         _, _, ho, wo = output_reshaped.size()
 
         output = output_reshaped.view(bs, self.co, self.no, ho, wo)  # bs, co, no, ho, wo
-        output = quantization_function(output, quantization_bits)
+        output = quantization_function(output, scaling_factors[0], quantization_bits)
 
         output = squash(output, dim=2)
-        output = quantization_function(output, quantization_bits)
+        output = quantization_function(output, scaling_factors[1], quantization_bits)
 
         return output
 
@@ -447,7 +447,7 @@ class Conv3DCaps(nn.Module):
         if iterations > 1:
             self.dynamic_routing_quantization = True
 
-    def forward(self, x, quantization_function, quantization_bits, quantization_bits_routing):
+    def forward(self, x, quantization_function, scaling_factors, quantization_bits, quantization_bits_routing):
         """ forward method
 
             Args:
@@ -466,12 +466,12 @@ class Conv3DCaps(nn.Module):
         _, _, _, ho, wo = conv.size()
 
         votes = conv.permute(0, 2, 1, 3, 4).contiguous().view(bs, ci, self.co, self.no, ho, wo)
-        votes = quantization_function(votes, quantization_bits)
+        votes = quantization_function(votes, scaling_factors[0], quantization_bits)
 
         logits = votes.new(bs, ci, self.co, ho, wo).zero_()  # bs, ci, co, ho, wo
 
         activation = update_routing_6D_DeepCaps(votes, logits, self.iterations, self.bias,
-                                                quantization_function, quantization_bits, quantization_bits_routing)
+                                                quantization_function, scaling_factors[1:self.iterations*4+1], quantization_bits, quantization_bits_routing)
 
         return activation  # bs, co, no, ho, wo
 
@@ -495,6 +495,9 @@ class DeepCapsBlock(nn.Module):
             iterations: number of iterations of the dynamic routing. If 1, no dynamic routing is performed
         """
         super(DeepCapsBlock, self).__init__()
+        
+        # conv2DCaps 2 scaling factors, 1 quantization_bits
+        # Conv3DCaps 4*iterations+1 scaling factors, 1 quantization_bits, 1 quantization_bits routing 
 
         self.l1 = Conv2DCaps(ci=ci, ni=ni, co=co, no=no, kernel_size=kernel_size, stride=stride, padding=padding[0])
         self.l2 = Conv2DCaps(ci=co, ni=no, co=co, no=no, kernel_size=kernel_size, stride=1, padding=padding[1])
@@ -510,7 +513,7 @@ class DeepCapsBlock(nn.Module):
             self.dynamic_routing_quantization = True
         self.iterations = iterations
 
-    def forward(self, x, quantization_function, quantization_bits, quantization_bits_routing=0):
+    def forward(self, x, quantization_function, scaling_factors, quantization_bits, quantization_bits_routing=0):
         """ forward method
             Args:
                 x: input Tensor of size [batch_size, ci, ni, hi, wi]
@@ -520,13 +523,13 @@ class DeepCapsBlock(nn.Module):
             Returns:
                 x: output Tensor of size [batch_size, co, no, ho, wo]
         """
-        x = self.l1(x, quantization_function, quantization_bits)
+        x = self.l1(x, quantization_function, scaling_factors[0:2], quantization_bits)
         if self.iterations == 1:
-            x_skip = self.l_skip(x, quantization_function, quantization_bits)
+            x_skip = self.l_skip(x, quantization_function, scaling_factors[6:], quantization_bits)
         else:
-            x_skip = self.l_skip(x, quantization_function, quantization_bits, quantization_bits_routing)
-        x = self.l2(x, quantization_function, quantization_bits)
-        x = self.l3(x, quantization_function, quantization_bits)
+            x_skip = self.l_skip(x, quantization_function, scaling_factors[6:], quantization_bits, quantization_bits_routing)
+        x = self.l2(x, quantization_function, scaling_factors[2:4], quantization_bits)
+        x = self.l3(x, quantization_function, scaling_factors[4:6], quantization_bits)
         x = x + x_skip
 
         return x

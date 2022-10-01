@@ -66,8 +66,8 @@ def main():
                         default=100, help='testing batch size. default=100')
 
     # GPU parameters
-    parser.add_argument('--visible-gpus', type=str, default="-1",
-                        help='set the ids of visible gpus, e.g. \'0\'. Default -1 (no visible gpu)')
+    parser.add_argument('--visible-gpus', type=str, default="0",
+                        help='set the ids of visible gpus, e.g. \'0\'. Default 0 ')
     parser.add_argument('--threads', type=int, default=4,
                         help='number of threads for data loader to use. default=4')
     parser.add_argument('--seed', type=int, default=42,
@@ -76,10 +76,12 @@ def main():
     # Q-CapsNets parameters
     parser.add_argument('--accuracy-tolerance', type=float, default=2,
                         help="accuracy tolerance expressed in percentage (e.g., 20 for 20%% tolerance)")
-    parser.add_argument('--quantization_method', type=str, default="stochastic_rounding",
+    parser.add_argument('--quantization-method', type=str, default="stochastic_rounding",
                         help="String with the name of the quantization method to use")
     parser.add_argument('--memory-budget', type=float, default=200,
                         help="Memory budget expressed in MB")
+    parser.add_argument('--std-multiplier', type=float, default=100, 
+                        help="Set to clamp scaling factor to [-std,std]*std_multiplier. default=100 (no clamping)")
 
     args = parser.parse_args()
 
@@ -152,7 +154,7 @@ def main():
 
     # Q-CAPSNETS FRAMEWORK
     qcapsnets(args.model, args.model_args, full_precision_filename, num_classes, test_loader, best_accuracy,
-              args.accuracy_tolerance, args.memory_budget, args.quantization_method)
+              args.accuracy_tolerance, args.memory_budget, args.quantization_method, args.std_multiplier)
 
 
 if __name__ == "__main__":

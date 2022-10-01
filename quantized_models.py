@@ -29,7 +29,7 @@ class ShallowCapsNet(nn.Module):
                                            kernel_size=9, stride=2, padding=0, iterations=1)
         self.digit = Capsules(ci=1152, ni=8, co=num_classes, no=dim_output_capsules, iterations=3)
 
-    def forward(self, x, quantization_function, quantization_bits, quantization_bits_routing):
+    def forward(self, x, quantization_function, scaling_factors, quantization_bits, quantization_bits_routing):
         """ forward method
             Args:
                 x: input Tensor of size [batch_size, ci, hi, wi]
@@ -38,14 +38,14 @@ class ShallowCapsNet(nn.Module):
                 quantization_bits_routing: list of the quantization bits for the dynamic routing
             Returns:
                 out_digit: output Tensor of size [batch_size, co, no]"""
-        out_conv = (self.conv(x, quantization_function, quantization_bits[0])).unsqueeze(1)
+        out_conv = (self.conv(x, quantization_function, scaling_factors[0], quantization_bits[0])).unsqueeze(1)
 
-        out_primary = self.primary(out_conv, quantization_function, quantization_bits[1],
+        out_primary = self.primary(out_conv, quantization_function, scaling_factors[1:6], quantization_bits[1],
                                      quantization_bits_routing[0])
         bs, c, n, h, w = out_primary.size()
         out_primary = out_primary.permute(0, 1, 3, 4, 2).contiguous().view(bs, -1, n)
 
-        out_digit = self.digit(out_primary, quantization_function, quantization_bits[2], quantization_bits_routing[1])
+        out_digit = self.digit(out_primary, quantization_function, scaling_factors[6:], quantization_bits[2], quantization_bits_routing[1])
 
         return out_digit
 
@@ -97,7 +97,7 @@ class DeepCaps(nn.Module):
 
         self.capsLayer = Capsules(ci=t, ni=8, co=num_classes, no=dim_output_capsules, iterations=3)
 
-    def forward(self, x, quantization_function, quantization_bits, quantization_bits_routing):
+    def forward(self, x, quantization_function, scaling_factors, quantization_bits, quantization_bits_routing):
         """ forward method
 
             Args:
@@ -108,22 +108,22 @@ class DeepCaps(nn.Module):
             Returns:
                 out_caps: output Tensor of size [batch_size, co, no] """
         # First convolution and conversion to capsules
-        l = self.conv1(x, quantization_function, quantization_bits[0])
+        l = self.conv1(x, quantization_function, scaling_factors[0], quantization_bits[0])
 
         l = l.unsqueeze(1)
 
         # Block One
-        l = self.block1(l, quantization_function, quantization_bits[1])
+        l = self.block1(l, quantization_function, scaling_factors[1:9], quantization_bits[1])
 
         # Block Two
-        l = self.block2(l, quantization_function, quantization_bits[2])
+        l = self.block2(l, quantization_function, scaling_factors[9:17], quantization_bits[2])
 
         # Block Three
-        l = self.block3(l, quantization_function, quantization_bits[3])
+        l = self.block3(l, quantization_function, scaling_factors[17:25], quantization_bits[3])
         l1 = l
 
         # Block Four
-        l = self.block4(l, quantization_function, quantization_bits[4], quantization_bits_routing[0])
+        l = self.block4(l, quantization_function, scaling_factors[25:44], quantization_bits[4], quantization_bits_routing[0])
         l2 = l
 
         # Capsule Flattening and collection
@@ -134,6 +134,6 @@ class DeepCaps(nn.Module):
         l = torch.cat((l1, l2), dim=1)
 
         # Linear capsule layer
-        out_caps = self.capsLayer(l, quantization_function, quantization_bits[5], quantization_bits_routing[1])
+        out_caps = self.capsLayer(l, quantization_function, scaling_factors[44:57], quantization_bits[5], quantization_bits_routing[1])
 
         return out_caps
