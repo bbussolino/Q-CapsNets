@@ -12,6 +12,7 @@ def round_to_nearest_inplace(x, s, n):
         Returns:
             x: quantized Tensor
     """
+    assert n > 0
     dequant_scale = s / 2**(n-1)   #  s / 2^{n-1}
     quant_scale = 1 / dequant_scale  # 2^{n-1} / s
     x.mul_(quant_scale).round_().clamp_(min=-2**(n-1), max=2**(n-1)-1).mul_(dequant_scale)
@@ -27,6 +28,7 @@ class ClassRoundToNearest(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input, s, n):
+        assert n > 0
         dequant_scale = s / 2**(n-1)   #  s / 2^{n-1}
         quant_scale = 1 / dequant_scale  # 2^{n-1} / s
         output = (input * quant_scale).round().clamp(min=-2**(n-1), max=2**(n-1)-1) * dequant_scale
@@ -61,6 +63,7 @@ def stochastic_rounding_inplace(x, s, n):
         Returns:
             x: quantized Tensor
     """
+    assert n > 0
     device = x.device 
     dtype = x.dtype 
     dequant_scale = s / 2**(n-1)   #  s / 2^{n-1}
@@ -86,6 +89,7 @@ class ClassStochasticRounding(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input, s, n):
+        assert n > 0
         device = input.device 
         dtype = input.dtype 
         dequant_scale = s / 2**(n-1)   #  s / 2^{n-1}
@@ -131,6 +135,7 @@ def truncation_inplace(x, s, n):
         Returns:
             x: quantized Tensor
     """
+    assert n > 0
     dequant_scale = s / 2**(n-1)   #  s / 2^{n-1}
     quant_scale = 1 / dequant_scale  # 2^{n-1} / s
     x.mul_(quant_scale).floor_().clamp_(min=-2**(n-1), max=2**(n-1)-1).mul_(dequant_scale)
@@ -145,6 +150,7 @@ class ClassTruncation(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input, s, n):
+        assert n > 0
         dequant_scale = s / 2**(n-1)   #  s / 2^{n-1}
         quant_scale = 1 / dequant_scale  # 2^{n-1} / s
         output = (input * quant_scale).floor().clamp(min=-2**(n-1), max=2**(n-1)-1) * dequant_scale

@@ -28,6 +28,7 @@ class Conv2d_ReLU(nn.Module, CharacterizationUtils):
                               kernel_size=kernel_size,
                               stride=stride)
         self.relu = nn.ReLU()
+        self.leaf = True
 
     def forward(self, x):
         """ forward method
@@ -72,6 +73,7 @@ class Conv2d_BN_ReLU(nn.Module, CharacterizationUtils):
                               stride=stride, padding=padding)
         self.batchnorm = nn.BatchNorm2d(num_features=out_channels, momentum=momentum, eps=eps)
         self.relu = nn.ReLU()
+        self.leaf = True
 
     def forward(self, x):
         """ forward method
@@ -261,6 +263,7 @@ class ConvPixelToCapsules(nn.Module, CharacterizationUtils):
                                 bias=False)
 
         self.bias = torch.nn.Parameter(torch.zeros(co, no, 1, 1))
+        self.leaf = True
 
     def forward(self, x):
         """ forward method
@@ -323,6 +326,7 @@ class Capsules(nn.Module, CharacterizationUtils):
         self.no = no
         self.ni = ni
         self.iterations = iterations
+        self.leaf = True
 
         init.kaiming_uniform_(self.weight)
         init.constant_(self.bias, 0.1)
@@ -393,6 +397,8 @@ class Conv2DCaps(nn.Module, CharacterizationUtils):
                               padding=padding)
         init.xavier_uniform_(self.conv.weight)
         init.zeros_(self.conv.bias)
+        
+        self.leaf = True
 
     def forward(self, x):
         """ forward method
@@ -461,6 +467,7 @@ class Conv3DCaps(nn.Module, CharacterizationUtils):
         init.constant_(self.bias, 0.1)
 
         self.iterations = iterations
+        self.leaf = True
 
     def forward(self, x):
         """ forward method
@@ -516,6 +523,7 @@ class DeepCapsBlock(nn.Module):
             iterations: number of iterations of the dynamic routing. If 1, no dynamic routing is performed
         """
         super(DeepCapsBlock, self).__init__()
+        self.leaf = False
 
         self.l1 = Conv2DCaps(ci=ci, ni=ni, co=co, no=no, kernel_size=kernel_size, stride=stride, padding=padding[0])
         self.l2 = Conv2DCaps(ci=co, ni=no, co=co, no=no, kernel_size=kernel_size, stride=1, padding=padding[1])

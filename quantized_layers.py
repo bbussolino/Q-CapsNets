@@ -27,6 +27,7 @@ class Conv2d_ReLU(nn.Module):
         self.relu = nn.ReLU()
 
         self.capsule_layer = False
+        self.leaf = True
 
     def forward(self, x, quantization_function, scaling_factor, quantization_bits):
         """ forward method
@@ -69,6 +70,7 @@ class Conv2d_BN_ReLU(nn.Module):
         self.batchnorm = nn.BatchNorm2d(num_features=out_channels, momentum=momentum, eps=eps)
         self.relu = nn.ReLU()
         self.capsule_layer = False
+        self.leaf = True
 
     def forward(self, x, quantization_function, scaling_factor, quantization_bits):
         """ forward method
@@ -246,9 +248,7 @@ class ConvPixelToCapsules(nn.Module):
         self.capsule_layer = True
         self.iterations = iterations
         self.dynamic_routing = True
-        self.dynamic_routing_quantization = False
-        if iterations > 1:
-            self.dynamic_routing_quantization = True
+        self.leaf = True
 
         self.conv3d = nn.Conv2d(in_channels=ni,
                                 out_channels=co * no,
@@ -316,9 +316,7 @@ class Capsules(nn.Module):
         self.capsule_layer = True
         self.iterations = iterations
         self.dynamic_routing = True
-        self.dynamic_routing_quantization = False
-        if iterations > 1:
-            self.dynamic_routing_quantization = True
+        self.leaf = True
 
     def forward(self, x, quantization_function, scaling_factors, quantization_bits, quantization_bits_routing):
         """ forward method
@@ -369,6 +367,7 @@ class Conv2DCaps(nn.Module):
         self.no = no  # atoms of capsules in output layer
         self.capsule_layer = True
         self.dynamic_routing = False
+        self.leaf = True
 
         # input shape:   bs, ci, ni, hi, wi
 
@@ -443,9 +442,7 @@ class Conv3DCaps(nn.Module):
         self.iterations = iterations
         self.capsule_layer = True
         self.dynamic_routing = True
-        self.dynamic_routing_quantization = False
-        if iterations > 1:
-            self.dynamic_routing_quantization = True
+        self.leaf = True
 
     def forward(self, x, quantization_function, scaling_factors, quantization_bits, quantization_bits_routing):
         """ forward method
@@ -510,7 +507,7 @@ class DeepCapsBlock(nn.Module):
             self.l_skip = Conv3DCaps(ci=co, ni=no, co=co, no=no, kernel_size=kernel_size, stride=1, padding=padding[3],
                                      iterations=iterations)
             self.dynamic_routing = True
-            self.dynamic_routing_quantization = True
+            self.leaf = False
         self.iterations = iterations
 
     def forward(self, x, quantization_function, scaling_factors, quantization_bits, quantization_bits_routing=0):
@@ -523,13 +520,13 @@ class DeepCapsBlock(nn.Module):
             Returns:
                 x: output Tensor of size [batch_size, co, no, ho, wo]
         """
-        x = self.l1(x, quantization_function, scaling_factors[0:2], quantization_bits)
+        x = self.l1(x, quantization_function, scaling_factors[0:2], quantization_bits[0])
         if self.iterations == 1:
-            x_skip = self.l_skip(x, quantization_function, scaling_factors[6:], quantization_bits)
+            x_skip = self.l_skip(x, quantization_function, scaling_factors[6:], quantization_bits[3])
         else:
-            x_skip = self.l_skip(x, quantization_function, scaling_factors[6:], quantization_bits, quantization_bits_routing)
-        x = self.l2(x, quantization_function, scaling_factors[2:4], quantization_bits)
-        x = self.l3(x, quantization_function, scaling_factors[4:6], quantization_bits)
+            x_skip = self.l_skip(x, quantization_function, scaling_factors[6:], quantization_bits[3], quantization_bits_routing)
+        x = self.l2(x, quantization_function, scaling_factors[2:4], quantization_bits[1])
+        x = self.l3(x, quantization_function, scaling_factors[4:6], quantization_bits[2])
         x = x + x_skip
 
         return x

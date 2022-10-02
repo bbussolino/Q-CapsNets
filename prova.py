@@ -204,3 +204,14 @@ def main():
         
 if __name__ == '__main__': 
     main()
+    
+    
+def get_leaf_modules(top_name, m): 
+    # m: generator 
+    for key, value in m: 
+        if hasattr(value, "leaf") and value.leaf == True: 
+            leaf_children.append(value)
+            leaf_children_names.append(top_name + '.' + key)
+        else: 
+            get_leaf_modules(top_name + '.' + key, value.named_children())
+    return 

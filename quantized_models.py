@@ -113,17 +113,17 @@ class DeepCaps(nn.Module):
         l = l.unsqueeze(1)
 
         # Block One
-        l = self.block1(l, quantization_function, scaling_factors[1:9], quantization_bits[1])
+        l = self.block1(l, quantization_function, scaling_factors[1:9], quantization_bits[1:5])
 
         # Block Two
-        l = self.block2(l, quantization_function, scaling_factors[9:17], quantization_bits[2])
+        l = self.block2(l, quantization_function, scaling_factors[9:17], quantization_bits[5:9])
 
         # Block Three
-        l = self.block3(l, quantization_function, scaling_factors[17:25], quantization_bits[3])
+        l = self.block3(l, quantization_function, scaling_factors[17:25], quantization_bits[9:13])
         l1 = l
 
         # Block Four
-        l = self.block4(l, quantization_function, scaling_factors[25:44], quantization_bits[4], quantization_bits_routing[0])
+        l = self.block4(l, quantization_function, scaling_factors[25:44], quantization_bits[13:17], quantization_bits_routing[0])
         l2 = l
 
         # Capsule Flattening and collection
@@ -134,6 +134,6 @@ class DeepCaps(nn.Module):
         l = torch.cat((l1, l2), dim=1)
 
         # Linear capsule layer
-        out_caps = self.capsLayer(l, quantization_function, scaling_factors[44:57], quantization_bits[5], quantization_bits_routing[1])
+        out_caps = self.capsLayer(l, quantization_function, scaling_factors[44:57], quantization_bits[17], quantization_bits_routing[1])
 
         return out_caps
