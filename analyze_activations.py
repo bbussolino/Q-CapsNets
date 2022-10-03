@@ -96,6 +96,8 @@ def main():
     best_accuracy = full_precision_test(model, num_classes, test_loader, model_filename, best_accuracy, False)
     print('\n \n Full-Precision Accuracy: ' + str(best_accuracy) + '%')
     
+    info = OrderedDict()
+    
     if args.model == "ShallowCapsNet":
         max_values = OrderedDict()
         max_values["conv"] = model.conv.max_values_dict
@@ -106,7 +108,6 @@ def main():
         scaling_factors = [] 
         scaling_factors.append(max_values["conv"]["input"].item())
         scaling_factors.append(max_values["conv"]["output"].item())
-        print(max_values["primary"])
         for l in ["primary", "digit"]: 
             for key, value in max_values[l].items(): 
                 if key == "input": 
@@ -115,7 +116,30 @@ def main():
             
                 
         scaling_factors = torch.Tensor(scaling_factors)
-        torch.save(scaling_factors, os.path.join("trained_models", "ShallowCapsNet_"+args.dataset+"_top_actsf.pt"))
+        info["scaling_factors"] = scaling_factors
+        
+        info["sqnr"] = OrderedDict()
+        
+        sum = 0 
+        num_el = 0
+        for key, value in model.conv.sqnr_dict.items(): 
+            sum += value 
+            num_el += 1 
+        info["sqnr"]["conv"] = sum/num_el
+        sum = 0 
+        num_el = 0
+        for key, value in model.primary.sqnr_dict.items(): 
+            sum += value 
+            num_el += 1 
+        info["sqnr"]["primary"] = sum/num_el
+        sum = 0 
+        num_el = 0
+        for key, value in model.digit.sqnr_dict.items(): 
+            sum += value 
+            num_el += 1
+        info["sqnr"]["digit"] = sum/num_el
+        
+        torch.save(info, os.path.join("trained_models", "ShallowCapsNet_"+args.dataset.replace('-', '') +"_top_a_info.pt"))
         
     elif args.model == "DeepCaps":
         max_values = OrderedDict()
@@ -137,6 +161,7 @@ def main():
         max_values["block4_l3"] = model.block4.l2.max_values_dict 
         max_values["block4_lskip"] = model.block4.l_skip.max_values_dict 
         max_values["capsLayer"] = model.capsLayer.max_values_dict 
+        
         
         #torch.save(max_values, os.path.join("trained_models", "DeepCaps_"+args.dataset+"_top_actsf.pt"))
         
@@ -166,7 +191,32 @@ def main():
             scaling_factors.append(max_values["capsLayer"][f"pre_softmax_{i}"].item())
             
         scaling_factors = torch.Tensor(scaling_factors)
-        torch.save(scaling_factors, os.path.join("trained_models", "DeepCaps_"+args.dataset+"_top_actsf.pt"))
+        
+        info["scaling_factors"] = scaling_factors
+        
+        layers_list = [model.conv1, 
+                       model.block1.l1, model.block1.l2, model.block1.l3, model.block1.l_skip, 
+                       model.block2.l1, model.block2.l2, model.block2.l3, model.block2.l_skip, 
+                       model.block3.l1, model.block3.l2, model.block3.l3, model.block3.l_skip, 
+                       model.block4.l1, model.block4.l2, model.block4.l3, model.block4.l_skip, 
+                       model.capsLayer]
+        layers_list_name = ["conv1", 
+                       "block1.l1", "block1.l2", "block1.l3", "block1.l_skip", 
+                       "block2.l1", "block2.l2", "block2.l3", "block2.l_skip", 
+                       "block3.l1", "block3.l2", "block3.l3", "block3.l_skip", 
+                       "block4.l1", "block4.l2", "block4.l3", "block4.l_skip", 
+                       "capsLayer"]
+        
+        info["sqnr"] = OrderedDict()
+        for layer, layer_name in zip(layers_list, layers_list_name): 
+            sum  = 0 
+            n = 0 
+            for key, value in layer.sqnr_dict.items(): 
+                sum += value 
+                n += 1 
+            info["sqnr"][layer_name] = sum/n
+            
+        torch.save(info, os.path.join("trained_models", "DeepCaps_"+args.dataset.replace('-','')+"_top_a_info.pt"))
 
     
     else: 

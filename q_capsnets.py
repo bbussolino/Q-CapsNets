@@ -97,7 +97,7 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     model_quant_original = model_quant_class(*model_parameters)
     model_quant_original.load_state_dict(torch.load(full_precision_filename))
     
-    weights_scale_factors_original = torch.load(full_precision_filename[:-3]+'_sf.pt', map_location=torch.device('cpu'))
+    weights_scale_factors_original = torch.load(full_precision_filename[:-3]+'_w_info.pt', map_location=torch.device('cpu'))
     weights_scale_factors = OrderedDict()
     for key, value in weights_scale_factors_original.items(): 
         weights_scale_factors[key] = torch.min(value[0], value[1]*std_multiplier)
@@ -117,8 +117,26 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     
         
     # Load scaling factors 
-    act_scale_factors = torch.load(full_precision_filename[:-3]+'_actsf.pt', map_location=torch.device('cpu'))
-    act_scale_factors = act_scale_factors.tolist()
+    act_info = torch.load(full_precision_filename[:-3]+'_a_info.pt', map_location=torch.device('cpu'))
+    act_scale_factors = act_info["scaling_factors"].tolist()
+    act_sqnr = [] 
+    for i, (key, value) in enumerate(act_info["sqnr"].items()): 
+        act_sqnr.append((key, value, i))
+    act_sqnr.sort(key=lambda tup: tup[1], reverse=False)
+    if len(act_sqnr) > 4: 
+        num_layer_per_sqnr_group = math.floor(len(act_sqnr) / 4)
+        act_sqnr_grouped_index = [[act_sqnr[i][2] for i in range(0, num_layer_per_sqnr_group)]]
+        act_sqnr_grouped_index.append([act_sqnr[i][2] for i in range(num_layer_per_sqnr_group, 2*num_layer_per_sqnr_group)])
+        act_sqnr_grouped_index.append([act_sqnr[i][2] for i in range(2*num_layer_per_sqnr_group, 3*num_layer_per_sqnr_group)])
+        act_sqnr_grouped_index.append([act_sqnr[i][2] for i in range(3*num_layer_per_sqnr_group, len(act_sqnr))])
+    else: 
+        act_sqnr_grouped_index = []
+        for i in range(len(act_sqnr)): 
+            act_sqnr_grouped_index.append([act_sqnr[i][2]])
+    
+    print(f'DEBUG act_sqnr {act_sqnr}')        
+    print(f'DEBUG act_sqnr_grouped {act_sqnr_grouped_index}')
+        
 
     # Move the model to GPU if available
     if torch.cuda.device_count() > 0:
@@ -425,7 +443,9 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
 
     # What is the accuracy that can still be consumed?
     branchA_accuracy_budget = step2_acc - minimum_accuracy
-    step3A_min_acc = step2_acc - branchA_accuracy_budget * 55 / 100
+    step3a_accuracy_budget = branchA_accuracy_budget * 55 / 100
+    step3a_accuracy_budget_per_step = step3a_accuracy_budget / len(act_sqnr_grouped_index)
+    step3A_min_acc = step2_acc 
 
     # STEP 3A  - layer-wise quantization of activations
     print("STEP 3A")
@@ -454,20 +474,24 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     
     step3a_acc = step2_acc  
     
-    for l in range(0, len(step3a_act_bits)):
+    start_bits = step3a_act_bits[0]
+    for l in range(0, len(act_sqnr_grouped_index)):
+        curr_bits = start_bits
+        step3A_min_acc -= step3a_accuracy_budget_per_step
         while True:
             if step3a_acc >= step3A_min_acc:
-                step3a_act_bits[l:] = list(np.add(step3a_act_bits[l:], -1))
-                for x in range(len(layers_dr_position)):
-                    step3a_dr_bits[x] = step3a_act_bits[layers_dr_position[x]]
+                if curr_bits < 3: 
+                    break 
+                for i in range(len(act_sqnr_grouped_index[l])): 
+                    step3a_act_bits[act_sqnr_grouped_index[l][i]] -= 1 
+                    curr_bits = step3a_act_bits[act_sqnr_grouped_index[l][i]]
                 step3a_acc_prev = step3a_acc
                 step3a_acc = quantized_test(model_step2, num_classes, data_loader,
                                             quantization_function_activations, act_scale_factors, step3a_act_bits, step3a_dr_bits)
                 print(step3a_weight_bits, step3a_act_bits, step3a_dr_bits, step3a_acc)
             else:
-                step3a_act_bits[l:] = list(np.add(step3a_act_bits[l:], +1))
-                for x in range(len(layers_dr_position)):
-                    step3a_dr_bits[x] = step3a_act_bits[layers_dr_position[x]]
+                for i in range(len(act_sqnr_grouped_index[l])): 
+                    step3a_act_bits[act_sqnr_grouped_index[l][i]] += 1 
                 step3a_acc = step3a_acc_prev
                 break
 
@@ -500,10 +524,16 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     dr_quantization_bits = [step4a_dr_bits[x] for x in dr_quantization_pos]
     
     step4a_acc = step3a_acc
+    step4a_accuracy_budget = step4a_acc - minimum_accuracy
+    step4a_accuracy_budget_per_step = step4a_accuracy_budget / len(dr_quantization_bits)
+    step4a_min_acc = step4a_acc
     for l in range(0, len(dr_quantization_bits)):
+        step4a_min_acc -= step4a_accuracy_budget_per_step
         while True:
-            if step4a_acc >= minimum_accuracy:
-                dr_quantization_bits[l:] = list(np.add(dr_quantization_bits[l:], -1))
+            if step4a_acc >= step4a_min_acc:
+                if dr_quantization_bits[l] < 3: 
+                    break
+                dr_quantization_bits[l] -= 1 
                 # update the whole vector step4a_dr_bits
                 for x in range(0, len(dr_quantization_bits)):
                     step4a_dr_bits[dr_quantization_pos[x]] = dr_quantization_bits[x]
@@ -513,7 +543,7 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
                 print(step4a_weight_bits, step4a_act_bits, step4a_dr_bits, step4a_acc)
             
             else:
-                dr_quantization_bits[l:] = list(np.add(dr_quantization_bits[l:], +1))
+                dr_quantization_bits[l] += 1 
                 # update the whole vector step4a_dr_bits
                 for x in range(0, len(dr_quantization_bits)):
                     step4a_dr_bits[dr_quantization_pos[x]] = dr_quantization_bits[x]
