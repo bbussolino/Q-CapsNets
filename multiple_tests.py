@@ -19,6 +19,9 @@ from full_precision_decoders import *
 from utils import load_data
 from q_capsnets import qcapsnets
 
+POSSIBLE_STD_MULTIPLIERS = {} 
+POSSIBLE_STD_MULTIPLIERS["ShallowCapsNet"] = {"mnist": [6, 7], "fashion-mnist": [6, 7, 8]}
+POSSIBLE_STD_MULTIPLIERS["DeepCaps"] = {"mnist": [6, 7], "fashion-mnist": [6, 7, 8, 1000], "cifar10": [6, 7, 8]}
 
 def main():
     global args
@@ -101,17 +104,17 @@ def main():
     model_dataset_combinations.append(["DeepCaps", [28, 1, 10, 32], "ConvDecoder28", [32, 1], "fashion-mnist", "./trained_models/DeepCaps_fashionmnist_top.pt", 32.2])
     model_dataset_combinations.append(["DeepCaps", [64, 3, 10, 32], "ConvDecoder64", [32, 3], "cifar10", "./trained_models/DeepCaps_cifar10_top.pt", 50.98])
     
-    possible_std_multipliers = [10000, 8, 7, 6, 5]
+    #possible_std_multipliers = [10000, 8, 7, 6, 5]
     possible_acc_tolerance = [0.2, 0.5, 1]
     possible_mem_budget_reduction = [2, 3, 4, 5, 6, 7, 8, 10]
-    possible_roundings = ["round_to_nearest", "stochastic_rounding", "truncation"]
+    possible_roundings = ["round_to_nearest"] #, "stochastic_rounding", "truncation"]
     
-    f = open("multiple_tests.txt", "w+")
+    f = open("multiple_tests.txt", "a+")
     
     for model_dataset_info in model_dataset_combinations: 
         for rounding in possible_roundings:
             f.write(f"{model_dataset_info[0]}\t{model_dataset_info[4]}\t{rounding}\n")
-            for std_multiplier in possible_std_multipliers: 
+            for std_multiplier in POSSIBLE_STD_MULTIPLIERS[model_dataset_info[0]][model_dataset_info[4]]: 
                 for acc_tolerance in possible_acc_tolerance: 
                     for mem_budget_reduction in possible_mem_budget_reduction: 
                         
@@ -160,7 +163,7 @@ def main():
                                 args.accuracy_tolerance, args.memory_budget, args.quantization_method, args.std_multiplier)
                         
                         f.write(f"{std_multiplier}\t{acc_tolerance}\t{mem_budget_reduction}\t{result}\n")
-                        print(f"{std_multiplier}\t{acc_tolerance}\t{mem_budget_reduction}\t{result}\n")
+                        print(f"{std_multiplier}\t{acc_tolerance}\t{mem_budget_reduction}\t{result}\n")  
                         
     f.close()
 

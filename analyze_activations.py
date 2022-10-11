@@ -146,19 +146,19 @@ def main():
         max_values["conv1"] = model.conv1.max_values_dict 
         max_values["block1_l1"] = model.block1.l1.max_values_dict 
         max_values["block1_l2"] = model.block1.l2.max_values_dict 
-        max_values["block1_l3"] = model.block1.l2.max_values_dict 
+        max_values["block1_l3"] = model.block1.l3.max_values_dict 
         max_values["block1_lskip"] = model.block1.l_skip.max_values_dict 
         max_values["block2_l1"] = model.block2.l1.max_values_dict 
         max_values["block2_l2"] = model.block2.l2.max_values_dict 
-        max_values["block2_l3"] = model.block2.l2.max_values_dict 
+        max_values["block2_l3"] = model.block2.l3.max_values_dict 
         max_values["block2_lskip"] = model.block2.l_skip.max_values_dict 
         max_values["block3_l1"] = model.block3.l1.max_values_dict 
         max_values["block3_l2"] = model.block3.l2.max_values_dict 
-        max_values["block3_l3"] = model.block3.l2.max_values_dict 
+        max_values["block3_l3"] = model.block3.l3.max_values_dict 
         max_values["block3_lskip"] = model.block3.l_skip.max_values_dict 
         max_values["block4_l1"] = model.block4.l1.max_values_dict 
         max_values["block4_l2"] = model.block4.l2.max_values_dict 
-        max_values["block4_l3"] = model.block4.l2.max_values_dict 
+        max_values["block4_l3"] = model.block4.l3.max_values_dict 
         max_values["block4_lskip"] = model.block4.l_skip.max_values_dict 
         max_values["capsLayer"] = model.capsLayer.max_values_dict 
         

@@ -393,7 +393,7 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     if branchB:   # was not able to satisfy both constraits 
         # MODEL MEMORY
         quantized_filename = full_precision_filename[:-3] + '_quantized_memory.pt'
-        torch.save(model_memory.state_dict(), quantized_filename)
+        #torch.save(model_memory.state_dict(), quantized_filename)
         print("Model-memory stored in ", quantized_filename)
         print("\t Weight bits: \t\t", model_memory_weight_bits)
         print("\t Activation bits: \t\t", model_memory_act_bits)
@@ -418,7 +418,7 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
         model_accuracy_acc = quantized_test(model_step2, num_classes, data_loader,
                                 quantization_function_activations, act_scale_factors, step2_act_bits, step2_dr_bits)
         quantized_filename = full_precision_filename[:-3] + '_quantized_accuracy.pt'
-        torch.save(model_step2.state_dict(), quantized_filename)
+        #torch.save(model_step2.state_dict(), quantized_filename)
         print("Model-accuracy stored in ", quantized_filename)
         print("\t Weight bits: \t\t", step2_weight_bits)
         print("\t Activation bits: \t\t", step2_act_bits)
@@ -563,7 +563,7 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
 
     print("\n")
     quantized_filename = full_precision_filename[:-3] + '_quantized_satisfied.pt'
-    torch.save(model_step2.state_dict(), quantized_filename)
+    #torch.save(model_step2.state_dict(), quantized_filename)
     print("Model-satisfied stored in ", quantized_filename)
     print("\t Weight bits: \t\t", step4a_weight_bits)
     print("\t Activation bits: \t\t", step4a_act_bits)
