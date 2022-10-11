@@ -27,7 +27,8 @@ def main():
     global args
 
     # Setting the hyper parameters
-    parser = argparse.ArgumentParser(description='Analyze Activations ShallowCaps', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description='Analyze Activations ShallowCaps', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     # Model parameters
     parser.add_argument('--model', type=str, default="ShallowCapsNet",
@@ -49,7 +50,7 @@ def main():
     # Parameters for testing
     parser.add_argument('--test-batch-size', type=int,
                         default=100, help='testing batch size. default=100')
-    
+
     parser.add_argument('--full-precision-filename', type=str, default="./model.pt",
                         help="name for the full-precision model")
 
@@ -68,16 +69,18 @@ def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = args.visible_gpus
 
     # Load data
-    train_loader, test_loader, num_channels, in_wh, num_classes = load_data(args)
-    
-    CharacterizationUtils.characterize = True 
+    train_loader, test_loader, num_channels, in_wh, num_classes = load_data(
+        args)
+
+    CharacterizationUtils.characterize = True
 
     # Build Capsule Network
     model_class = getattr(sys.modules[__name__], args.model)
     model = model_class(*args.model_args)
     model_filename = args.full_precision_filename
 
-    model.load_state_dict(torch.load(args.trained_weights_path))  # load pre-trained weights
+    # load pre-trained weights
+    model.load_state_dict(torch.load(args.trained_weights_path))
 
     # Move model to GPU if possible
     if torch.cuda.device_count() > 0:
@@ -89,90 +92,97 @@ def main():
 
     # Print the model architecture and parameters
     print('Model architecture:\n{}\n'.format(model))
-    
 
     # PRE-TRAINED WEIGHTS EVALUATION
     best_accuracy = 0
-    best_accuracy = full_precision_test(model, num_classes, test_loader, model_filename, best_accuracy, False)
+    best_accuracy = full_precision_test(
+        model, num_classes, test_loader, model_filename, best_accuracy, False)
     print('\n \n Full-Precision Accuracy: ' + str(best_accuracy) + '%')
-    
+
     if args.model == "ShallowCapsNet":
         max_values = OrderedDict()
         max_values["conv"] = model.conv.max_values_dict
-        max_values["primary"] = model.primary.max_values_dict 
-        max_values["digit"] = model.digit.max_values_dict 
-        
+        max_values["primary"] = model.primary.max_values_dict
+        max_values["digit"] = model.digit.max_values_dict
+
         # torch.save(max_values, os.path.join("trained_models", "ShallowCapsNet_"+args.dataset+"_top_actsf.pt"))
-        scaling_factors = [] 
+        scaling_factors = []
         scaling_factors.append(max_values["conv"]["input"].item())
         scaling_factors.append(max_values["conv"]["output"].item())
         print(max_values["primary"])
-        for l in ["primary", "digit"]: 
-            for key, value in max_values[l].items(): 
-                if key == "input": 
+        for l in ["primary", "digit"]:
+            for key, value in max_values[l].items():
+                if key == "input":
                     continue
                 scaling_factors.append(value.item())
-            
-                
+
         scaling_factors = torch.Tensor(scaling_factors)
-        torch.save(scaling_factors, os.path.join("trained_models", "ShallowCapsNet_"+args.dataset+"_top_actsf.pt"))
-        
+        torch.save(scaling_factors, os.path.join("trained_models",
+                   "ShallowCapsNet_"+args.dataset+"_top_actsf.pt"))
+
     elif args.model == "DeepCaps":
         max_values = OrderedDict()
-        max_values["conv1"] = model.conv1.max_values_dict 
-        max_values["block1_l1"] = model.block1.l1.max_values_dict 
-        max_values["block1_l2"] = model.block1.l2.max_values_dict 
-        max_values["block1_l3"] = model.block1.l2.max_values_dict 
-        max_values["block1_lskip"] = model.block1.l_skip.max_values_dict 
-        max_values["block2_l1"] = model.block2.l1.max_values_dict 
-        max_values["block2_l2"] = model.block2.l2.max_values_dict 
-        max_values["block2_l3"] = model.block2.l2.max_values_dict 
-        max_values["block2_lskip"] = model.block2.l_skip.max_values_dict 
-        max_values["block3_l1"] = model.block3.l1.max_values_dict 
-        max_values["block3_l2"] = model.block3.l2.max_values_dict 
-        max_values["block3_l3"] = model.block3.l2.max_values_dict 
-        max_values["block3_lskip"] = model.block3.l_skip.max_values_dict 
-        max_values["block4_l1"] = model.block4.l1.max_values_dict 
-        max_values["block4_l2"] = model.block4.l2.max_values_dict 
-        max_values["block4_l3"] = model.block4.l2.max_values_dict 
-        max_values["block4_lskip"] = model.block4.l_skip.max_values_dict 
-        max_values["capsLayer"] = model.capsLayer.max_values_dict 
-        
+        max_values["conv1"] = model.conv1.max_values_dict
+        max_values["block1_l1"] = model.block1.l1.max_values_dict
+        max_values["block1_l2"] = model.block1.l2.max_values_dict
+        max_values["block1_l3"] = model.block1.l3.max_values_dict
+        max_values["block1_lskip"] = model.block1.l_skip.max_values_dict
+        max_values["block2_l1"] = model.block2.l1.max_values_dict
+        max_values["block2_l2"] = model.block2.l2.max_values_dict
+        max_values["block2_l3"] = model.block2.l3.max_values_dict
+        max_values["block2_lskip"] = model.block2.l_skip.max_values_dict
+        max_values["block3_l1"] = model.block3.l1.max_values_dict
+        max_values["block3_l2"] = model.block3.l2.max_values_dict
+        max_values["block3_l3"] = model.block3.l3.max_values_dict
+        max_values["block3_lskip"] = model.block3.l_skip.max_values_dict
+        max_values["block4_l1"] = model.block4.l1.max_values_dict
+        max_values["block4_l2"] = model.block4.l2.max_values_dict
+        max_values["block4_l3"] = model.block4.l3.max_values_dict
+        max_values["block4_lskip"] = model.block4.l_skip.max_values_dict
+        max_values["capsLayer"] = model.capsLayer.max_values_dict
+
         #torch.save(max_values, os.path.join("trained_models", "DeepCaps_"+args.dataset+"_top_actsf.pt"))
-        
+
         scaling_factors = []
         scaling_factors.append(max_values["conv1"]["input"].item())
         scaling_factors.append(max_values["conv1"]["output"].item())
-        for i in range(1, 5): #1,2,3,4
-            for j in ["l1", "l2", "l3", "lskip"]: 
-                if i == 4 and j == "lskip": 
+        for i in range(1, 5):  # 1,2,3,4
+            for j in ["l1", "l2", "l3", "lskip"]:
+                if i == 4 and j == "lskip":
                     continue
-                scaling_factors.append(max_values[f"block{i}_{j}"]["pre_squash"].item())
-                scaling_factors.append(max_values[f"block{i}_{j}"]["output"].item())
-                
-        scaling_factors.append(max_values["block4_lskip"]["votes"].item())
-        for i in range(0, 3): 
-            scaling_factors.append(max_values["block4_lskip"][f"post_softmax_{i}"].item())
-            scaling_factors.append(max_values["block4_lskip"][f"pre_squash_{i}"].item())
-            scaling_factors.append(max_values["block4_lskip"][f"output_{i}"].item())
-            scaling_factors.append(max_values["block4_lskip"][f"pre_softmax_{i}"].item())
-            
-            
-        scaling_factors.append(max_values["capsLayer"]["votes"].item())
-        for i in range(0, 3): 
-            scaling_factors.append(max_values["capsLayer"][f"post_softmax_{i}"].item())
-            scaling_factors.append(max_values["capsLayer"][f"pre_squash_{i}"].item())
-            scaling_factors.append(max_values["capsLayer"][f"output_{i}"].item())
-            scaling_factors.append(max_values["capsLayer"][f"pre_softmax_{i}"].item())
-            
-        scaling_factors = torch.Tensor(scaling_factors)
-        torch.save(scaling_factors, os.path.join("trained_models", "DeepCaps_"+args.dataset+"_top_actsf.pt"))
+                scaling_factors.append(
+                    max_values[f"block{i}_{j}"]["pre_squash"].item())
+                scaling_factors.append(
+                    max_values[f"block{i}_{j}"]["output"].item())
 
-    
-    else: 
+        scaling_factors.append(max_values["block4_lskip"]["votes"].item())
+        for i in range(0, 3):
+            scaling_factors.append(
+                max_values["block4_lskip"][f"post_softmax_{i}"].item())
+            scaling_factors.append(
+                max_values["block4_lskip"][f"pre_squash_{i}"].item())
+            scaling_factors.append(
+                max_values["block4_lskip"][f"output_{i}"].item())
+            scaling_factors.append(
+                max_values["block4_lskip"][f"pre_softmax_{i}"].item())
+
+        scaling_factors.append(max_values["capsLayer"]["votes"].item())
+        for i in range(0, 3):
+            scaling_factors.append(
+                max_values["capsLayer"][f"post_softmax_{i}"].item())
+            scaling_factors.append(
+                max_values["capsLayer"][f"pre_squash_{i}"].item())
+            scaling_factors.append(
+                max_values["capsLayer"][f"output_{i}"].item())
+            scaling_factors.append(
+                max_values["capsLayer"][f"pre_softmax_{i}"].item())
+
+        scaling_factors = torch.Tensor(scaling_factors)
+        torch.save(scaling_factors, os.path.join(
+            "trained_models", "DeepCaps_"+args.dataset+"_top_actsf.pt"))
+
+    else:
         raise ValueError("Not supported network")
-        
-        
 
 
 if __name__ == "__main__":
