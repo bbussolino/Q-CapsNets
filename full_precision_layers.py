@@ -38,13 +38,13 @@ class Conv2d_ReLU(nn.Module, CharacterizationUtils):
             Returns:
                 out_conv: output Tensor of shape [batch_size, out_channels, ho, wo]
         """
-        if CharacterizationUtils.characterize: 
+        if CharacterizationUtils.characterize:
             self.update_max(x, "input")
             self.update_sqnr(x, "input")
         out_conv = self.conv(x)  # Convolution
         out_conv = self.relu(out_conv)  # Activation
-        
-        if CharacterizationUtils.characterize: 
+
+        if CharacterizationUtils.characterize:
             self.update_max(out_conv, "output")
             self.update_sqnr(out_conv, "output")
 
@@ -73,7 +73,8 @@ class Conv2d_BN_ReLU(nn.Module, CharacterizationUtils):
         CharacterizationUtils.__init__(self)
         self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                               stride=stride, padding=padding)
-        self.batchnorm = nn.BatchNorm2d(num_features=out_channels, momentum=momentum, eps=eps)
+        self.batchnorm = nn.BatchNorm2d(
+            num_features=out_channels, momentum=momentum, eps=eps)
         self.relu = nn.ReLU()
         self.leaf = True
 
@@ -85,17 +86,18 @@ class Conv2d_BN_ReLU(nn.Module, CharacterizationUtils):
             Returns:
                 out_conv: output Tensor of shape [batch_size, out_channels, ho, wo]
         """
-        if CharacterizationUtils.characterize: 
+        if CharacterizationUtils.characterize:
             self.update_max(x, "input")
             self.update_sqnr(x, "input")
         out_conv = self.conv(x)
         out_conv = self.relu(out_conv)
         out_conv = self.batchnorm(out_conv)
-        if CharacterizationUtils.characterize: 
+        if CharacterizationUtils.characterize:
             self.update_max(out_conv, "output")
             self.update_sqnr(out_conv, "output")
 
         return out_conv
+
 
 class DynamicRouting(CharacterizationUtils):
     def squash(self, x, dim=2):
@@ -109,7 +111,6 @@ class DynamicRouting(CharacterizationUtils):
             A tensor squashed along dimension dim of the same shape of x """
         norm = torch.norm(x, dim=dim, keepdim=True)
         return x * norm / (1 + norm ** 2)
-
 
     def update_routing(self, votes, logits, iterations, bias):
         """ Dynamic routing algorithm   (paper: Dynamic Routing Between Capsules, Sabour et al., 2017)
@@ -143,49 +144,58 @@ class DynamicRouting(CharacterizationUtils):
             """
         # Raise an error if the number of iterations is lower than 1
         if iterations < 1:
-            raise ValueError('The number of iterations must be greater or equal than 1')
+            raise ValueError(
+                'The number of iterations must be greater or equal than 1')
 
         # Perform different permutations depending on the number of dimensions of the vector (4 or 6)
         dimensions = len(votes.size())
         if dimensions == 4:  # [bs, ci, co, no]
-            votes_trans = votes.permute(3, 0, 1, 2).contiguous()  # [no, bs, ci, co]
+            votes_trans = votes.permute(
+                3, 0, 1, 2).contiguous()  # [no, bs, ci, co]
 
         else:  # [bs, ci, co, no, ho, wo]
-            votes_trans = votes.permute(3, 0, 1, 2, 4, 5).contiguous()  # [no, bs, ci, co, ho, wo]
-        
+            # [no, bs, ci, co, ho, wo]
+            votes_trans = votes.permute(3, 0, 1, 2, 4, 5).contiguous()
+
         for iteration in range(iterations):
             route = F.softmax(logits, dim=2)
-            if CharacterizationUtils.characterize: 
+            if CharacterizationUtils.characterize:
                 self.update_max(route, f"post_softmax_{iteration}")
                 self.update_sqnr(route, f"post_softmax_{iteration}")
-            
+
             preactivate_unrolled = route * votes_trans
             if dimensions == 4:
-                preactivate_trans = preactivate_unrolled.permute(1, 2, 3, 0).contiguous()  # bs, ci, co, no
+                preactivate_trans = preactivate_unrolled.permute(
+                    1, 2, 3, 0).contiguous()  # bs, ci, co, no
             else:
-                preactivate_trans = preactivate_unrolled.permute(1, 2, 3, 0, 4, 5).contiguous()  # bs, ci, co, no, ho, wo
+                preactivate_trans = preactivate_unrolled.permute(
+                    1, 2, 3, 0, 4, 5).contiguous()  # bs, ci, co, no, ho, wo
 
-            preactivate = preactivate_trans.sum(dim=1) + bias  # bs, co, no, (ho, wo)
-            if CharacterizationUtils.characterize: 
+            preactivate = preactivate_trans.sum(
+                dim=1) + bias  # bs, co, no, (ho, wo)
+            if CharacterizationUtils.characterize:
                 self.update_max(preactivate, f"pre_squash_{iteration}")
                 self.update_sqnr(preactivate, f"pre_squash_{iteration}")
-                
-            activation = self.squash(preactivate, dim=2)  # bs, co, no, (ho, wo)
-            if CharacterizationUtils.characterize: 
+                self.update_hist(preactivate, f"pre_squash_{iteration}")
+
+            # bs, co, no, (ho, wo)
+            activation = self.squash(preactivate, dim=2)
+            if CharacterizationUtils.characterize:
                 self.update_max(activation, f"output_{iteration}")
                 self.update_sqnr(activation, f"output_{iteration}")
 
             act_3d = activation.unsqueeze(1)  # bs, 1, co, no, (ho,wo)
             distances = (votes * act_3d).sum(dim=3)  # bs, ci, co, ho, wo
             logits = logits + distances
-            if CharacterizationUtils.characterize: 
+            if CharacterizationUtils.characterize:
                 self.update_max(logits, f"pre_softmax_{iteration}")
                 self.update_sqnr(logits, f"pre_softmax_{iteration}")
-                
+                self.update_hist(logits, f"pre_softmax_{iteration}")
+
         return activation
 
-
-    def update_routing_6D_DeepCaps(self, votes, logits, iterations, bias):  # differs from above
+    # differs from above
+    def update_routing_6D_DeepCaps(self, votes, logits, iterations, bias):
         """ Dynamic routing algorithm used in DeepCaps for the convolutional capsule layers
 
         Args:
@@ -207,7 +217,8 @@ class DynamicRouting(CharacterizationUtils):
             """
         # Raise an error if the number of iterations is lower than 1
         if iterations < 1:
-            raise ValueError('The number of iterations must be greater or equal than 1')
+            raise ValueError(
+                'The number of iterations must be greater or equal than 1')
 
         bs, ci, co, no, ho, wo = votes.size()
 
@@ -216,24 +227,29 @@ class DynamicRouting(CharacterizationUtils):
             logits_temp = logits.view(bs, ci, -1)  # bs, ci, co*ho*wo
             route_temp = F.softmax(logits_temp, dim=2)  # bs, ci, co*ho*wo
             route = route_temp.view(bs, ci, co, ho, wo)  # bs, ci, co, ho, wo
-            if CharacterizationUtils.characterize: 
+            if CharacterizationUtils.characterize:
                 self.update_max(route, f"post_softmax_{iteration}")
                 self.update_sqnr(route, f"post_softmax_{iteration}")
-            preactivate_unrolled = route.unsqueeze(3) * votes  # bs, ci, co, no, ho, wo
-            preactivate = preactivate_unrolled.sum(1) + bias  # bs, co, no, ho, wo
-            if CharacterizationUtils.characterize: 
+            preactivate_unrolled = route.unsqueeze(
+                3) * votes  # bs, ci, co, no, ho, wo
+            preactivate = preactivate_unrolled.sum(
+                1) + bias  # bs, co, no, ho, wo
+            if CharacterizationUtils.characterize:
                 self.update_max(preactivate, f"pre_squash_{iteration}")
                 self.update_sqnr(preactivate, f"pre_squash_{iteration}")
+                self.update_hist(preactivate, f"pre_squash_{iteration}")
             activation = self.squash(preactivate, dim=2)  # bs, co, no, ho, wo
-            if CharacterizationUtils.characterize: 
+            if CharacterizationUtils.characterize:
                 self.update_max(activation, f"output_{iteration}")
                 self.update_sqnr(activation, f"output_{iteration}")
             act_3d = activation.unsqueeze(1)  # bs, 1, co, no, ho, wo
-            distances = (act_3d * votes).sum(3)  # bs, ci, co, no, ho, wo --> bs, ci, co, ho, wo
+            # bs, ci, co, no, ho, wo --> bs, ci, co, ho, wo
+            distances = (act_3d * votes).sum(3)
             logits = logits + distances
-            if CharacterizationUtils.characterize: 
+            if CharacterizationUtils.characterize:
                 self.update_max(logits, f"pre_softmax_{iteration}")
                 self.update_sqnr(logits, f"pre_softmax_{iteration}")
+                self.update_hist(logits, f"pre_softmax_{iteration}")
 
         return activation
 
@@ -284,8 +300,8 @@ class ConvPixelToCapsules(nn.Module, DynamicRouting):
             activation: output Tensor of shape [bs, co, no, ho, wo]
         """
         bs, ci, ni, hi, wi = x.size()
-        
-        if CharacterizationUtils.characterize: 
+
+        if CharacterizationUtils.characterize:
             self.update_max(x, "input")
             self.update_sqnr(x, "input")
         # Reshape input and perform convolution to compute \hat{u_{j|i}} = votes
@@ -294,15 +310,17 @@ class ConvPixelToCapsules(nn.Module, DynamicRouting):
         _, _, ho, wo = votes.size()
 
         # Reshape votes, initialize logits and perform dynamic routing
-        votes_reshaped = votes.view(bs, ci, self.co, self.no, ho, wo).contiguous()
+        votes_reshaped = votes.view(
+            bs, ci, self.co, self.no, ho, wo).contiguous()
         logits = votes_reshaped.new(bs, ci, self.co, ho, wo).zero_()
-        
-        if CharacterizationUtils.characterize: 
+
+        if CharacterizationUtils.characterize:
             self.update_max(votes, "votes")
             self.update_sqnr(votes, "votes")
 
-        activation = self.update_routing(votes_reshaped, logits, self.iterations, self.bias)
-        
+        activation = self.update_routing(
+            votes_reshaped, logits, self.iterations, self.bias)
+
         return activation
 
 
@@ -345,31 +363,34 @@ class Capsules(nn.Module, DynamicRouting):
             activation: output Tensor of shape [bs, co, no]
         """
         bs = x.size(0)
-        
-        if CharacterizationUtils.characterize: 
+
+        if CharacterizationUtils.characterize:
             self.update_max(x, "input")
             self.update_sqnr(x, "input")
 
         # Compute \hat{u_{j|i}} = votes
-        votes = (x.unsqueeze(3) * self.weight).sum(dim=2).view(-1, self.ci, self.co, self.no)
-        
-        if CharacterizationUtils.characterize: 
+        votes = (x.unsqueeze(3) * self.weight).sum(dim=2).view(-1,
+                                                               self.ci, self.co, self.no)
+
+        if CharacterizationUtils.characterize:
             self.update_max(votes, "votes")
             self.update_sqnr(votes, "votes")
 
         # Initialize logits and perform dynamic routing
         logits = votes.new(bs, self.ci, self.co).zero_()
-        activation = self.update_routing(votes, logits, self.iterations, self.bias)
-            
+        activation = self.update_routing(
+            votes, logits, self.iterations, self.bias)
+
         return activation
 
 
-class Conv2DCaps(nn.Module, DynamicRouting): 
+class Conv2DCaps(nn.Module, DynamicRouting):
     """ 2D Convolutional layer used in DeepCaps (no dynamic routing)
 
         Methods:
             forward: computes the output given the input
     """
+
     def __init__(self, ci, ni, co, no, kernel_size, stride, padding):
         """ Parameters:
             ci: number of input channels
@@ -397,7 +418,7 @@ class Conv2DCaps(nn.Module, DynamicRouting):
                               padding=padding)
         init.xavier_uniform_(self.conv.weight)
         init.zeros_(self.conv.bias)
-        
+
         self.leaf = True
 
     def forward(self, x):
@@ -408,25 +429,26 @@ class Conv2DCaps(nn.Module, DynamicRouting):
             Returns:
                 output: Tensor of shape [bathc_size, co, no, ho, wo]
         """
-        if CharacterizationUtils.characterize: 
+        if CharacterizationUtils.characterize:
             self.update_max(x, "input")
             self.update_sqnr(x, "input")
-        
+
         bs, ci, ni, hi, wi = x.size()
         input_reshaped = x.view(bs, ci * ni, hi, wi)
 
         output_reshaped = self.conv(input_reshaped)  # bs, co*no, ho, wo
         _, _, ho, wo = output_reshaped.size()
 
-        output = output_reshaped.view(bs, self.co, self.no, ho, wo)  # bs, co, no, ho, wo
-        
-        if CharacterizationUtils.characterize: 
+        output = output_reshaped.view(
+            bs, self.co, self.no, ho, wo)  # bs, co, no, ho, wo
+
+        if CharacterizationUtils.characterize:
             self.update_max(output, "pre_squash")
             self.update_sqnr(output, "pre_squash")
 
         output = self.squash(output, dim=2)
-        
-        if CharacterizationUtils.characterize: 
+
+        if CharacterizationUtils.characterize:
             self.update_max(output, "output")
             self.update_sqnr(output, "output")
 
@@ -439,6 +461,7 @@ class Conv3DCaps(nn.Module, DynamicRouting):
         Methods:
             forward: computes the output given the input
     """
+
     def __init__(self, ci, ni, co, no, kernel_size, stride, padding, iterations):
         """ Parameters:
             ci: number of input channels
@@ -481,7 +504,7 @@ class Conv3DCaps(nn.Module, DynamicRouting):
                 activation: Tensor of shape [batch_size, co, no, ho, wo]
         """
         bs, ci, ni, hi, wi = x.size()
-        if CharacterizationUtils.characterize: 
+        if CharacterizationUtils.characterize:
             self.update_max(x, "input")
             self.update_sqnr(x, "input")
 
@@ -490,14 +513,17 @@ class Conv3DCaps(nn.Module, DynamicRouting):
         conv = self.conv(input_tensor_reshaped)  # bs, co*no, ci, ho, wo
         _, _, _, ho, wo = conv.size()
 
-        votes = conv.permute(0, 2, 1, 3, 4).contiguous().view(bs, ci, self.co, self.no, ho, wo)
-        if CharacterizationUtils.characterize: 
+        votes = conv.permute(0, 2, 1, 3, 4).contiguous().view(
+            bs, ci, self.co, self.no, ho, wo)
+        if CharacterizationUtils.characterize:
             self.update_max(votes, "votes")
             self.update_sqnr(votes, "votes")
 
-        logits = votes.new(bs, ci, self.co, ho, wo).zero_()  # bs, ci, co, ho, wo
+        # bs, ci, co, ho, wo
+        logits = votes.new(bs, ci, self.co, ho, wo).zero_()
 
-        activation = self.update_routing_6D_DeepCaps(votes, logits, self.iterations, self.bias)
+        activation = self.update_routing_6D_DeepCaps(
+            votes, logits, self.iterations, self.bias)
 
         return activation  # bs, co, no, ho, wo
 
@@ -509,6 +535,7 @@ class DeepCapsBlock(nn.Module):
         Methods:
             forward: computes the output given the input
     """
+
     def __init__(self, ci, ni, co, no, kernel_size, stride, padding, iterations):
         """Parameters:
             ci: number of input channels,
@@ -523,11 +550,15 @@ class DeepCapsBlock(nn.Module):
         super(DeepCapsBlock, self).__init__()
         self.leaf = False
 
-        self.l1 = Conv2DCaps(ci=ci, ni=ni, co=co, no=no, kernel_size=kernel_size, stride=stride, padding=padding[0])
-        self.l2 = Conv2DCaps(ci=co, ni=no, co=co, no=no, kernel_size=kernel_size, stride=1, padding=padding[1])
-        self.l3 = Conv2DCaps(ci=co, ni=no, co=co, no=no, kernel_size=kernel_size, stride=1, padding=padding[2])
+        self.l1 = Conv2DCaps(ci=ci, ni=ni, co=co, no=no,
+                             kernel_size=kernel_size, stride=stride, padding=padding[0])
+        self.l2 = Conv2DCaps(ci=co, ni=no, co=co, no=no,
+                             kernel_size=kernel_size, stride=1, padding=padding[1])
+        self.l3 = Conv2DCaps(ci=co, ni=no, co=co, no=no,
+                             kernel_size=kernel_size, stride=1, padding=padding[2])
         if iterations == 1:
-            self.l_skip = Conv2DCaps(ci=co, ni=no, co=co, no=no, kernel_size=kernel_size, stride=1, padding=padding[2])
+            self.l_skip = Conv2DCaps(
+                ci=co, ni=no, co=co, no=no, kernel_size=kernel_size, stride=1, padding=padding[2])
         else:
             self.l_skip = Conv3DCaps(ci=co, ni=no, co=co, no=no, kernel_size=kernel_size, stride=1, padding=padding[3],
                                      iterations=iterations)
