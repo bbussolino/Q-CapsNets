@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument('--input-file', type=str,
                     default='multiple_tests.txt', help='File with input data', metavar='PATH')
-parser.add_argument('--pictures-format', type=str, default='.png',
+parser.add_argument('--pictures-format', type=str, default='png',
                     help='Format of output pictures, with a trailing .')
 parser.add_argument('--scaling-factor-analysis',
                     action='store_true', default=False)
@@ -27,7 +27,9 @@ ACT_SIZES['DeepCaps'] = {'mnist': [784, 100352, 100352, 50176, 16384, 4096, 320]
                          'fashion-mnist': [784, 100352, 100352, 50176, 16384, 4096, 320],
                          'cifar10': [12288, 524288, 524288, 262144, 65536, 16384, 320]}
 
-SF = 'OPT'  # 'MAX', 'OPT'
+DATASET_TITLES = {'mnist': 'MNIST', 'fashion-mnist': 'FMNIST', 'cifar10': 'CIFAR10'}
+
+SF = 'MAX'  # 'MAX', 'OPT'
 
 scaling_factors_dict = {}
 if SF == 'OPT':
@@ -209,7 +211,7 @@ def data_analysis(args):
                     ax.set_ylabel('Accuracy')
 
                     fig.savefig('figures/scaling_factors_analysis/' +
-                                '_'.join([network, dataset, rmethod]) + '.png')
+                                '_'.join([network, dataset, rmethod])+ '.' + args.pictures_format)
 
     ##### QUANTIZATION METHODS ANALYSIS #####
     if args.quantization_method_analysis:
@@ -220,7 +222,8 @@ def data_analysis(args):
                     data_dict[network][dataset].keys())
                 cm_subsection = linspace(0., 1., number_of_qmethods)
                 colors = [cm.jet(x) for x in cm_subsection]
-                for i, rmethod in enumerate(data_dict[network][dataset].keys()):
+                #for i, rmethod in enumerate(data_dict[network][dataset].keys()):
+                for i, rmethod in enumerate(["round_to_nearest", "stochastic_rounding", "truncation"]):
                     curr_scaling_factor = scaling_factors_dict[network][dataset]
                     x, y = [], []
                     for test in data_dict[network][dataset][rmethod][curr_scaling_factor]:
@@ -228,18 +231,17 @@ def data_analysis(args):
                         y.append(test[3])
                     p_frontX, p_frontY, _ = pareto_frontier(
                         x, y, maxX=True, maxY=True)
-                    ax.scatter(x, y, color=colors[i])
-                    ax.plot(p_frontX, p_frontY, color=colors[i],
-                            label=rmethod)
+                    ax.scatter(x, y)#, color=colors[i])
+                    ax.plot(p_frontX, p_frontY, label=rmethod) #, color=colors[i])
 
                 ax.legend()
                 ax.grid(True)
-                ax.set_title('_'.join([network, dataset]))
+                ax.set_title(f'{network} - {DATASET_TITLES[dataset]}')
                 ax.set_xlabel('Weight memory reduction')
                 ax.set_ylabel('Accuracy')
 
                 fig.savefig('figures/quantization_method_analysis/' +
-                            '_'.join([network, dataset]) + '.png')
+                            '_'.join([network, dataset]) + '.' + args.pictures_format)
 
     ##### OVERALL BEST RESULTS PRINT (excel) #####
     # merge di tutti i rounding methods insieme - plot
@@ -249,12 +251,13 @@ def data_analysis(args):
         for dataset in data_dict[network].keys():
             fig, ax = plt.subplots()
             curr_scaling_factor = scaling_factors_dict[network][dataset]
-            x, y, tests = [], [], []
+            x, y, tests, test_rmethod = [], [], [], []
             for i, rmethod in enumerate(data_dict[network][dataset].keys()):
                 for test in data_dict[network][dataset][rmethod][curr_scaling_factor]:
                     x.append(test[4])
                     y.append(test[3])
                     tests.append(test)
+                    test_rmethod.append(rmethod)
             p_frontX, p_frontY, p_index = pareto_frontier(
                 x, y, maxX=True, maxY=True)
             ax.scatter(x, y, color=cm.jet(0))
@@ -266,7 +269,7 @@ def data_analysis(args):
             ax.set_ylabel('Accuracy')
 
             fig.savefig('figures/' +
-                        '_'.join([network, dataset]) + '.png')
+                        '_'.join([network, dataset])+ '.' + args.pictures_format)
 
             f.write(f'{network}, {dataset}\n')
             max_acc = 0
@@ -287,11 +290,50 @@ def data_analysis(args):
             # test: w_bits, a_bits, dr_bits, acc, w_red, a_red
             costs = [[t[3], t[4], a] for t, a in zip(tests, act_red_list)]
             are_pareto = pareto_frontier_3d(costs)
-            for test, a, p in zip(tests, act_red_list, are_pareto):
+            
+            acc_list_plot = []
+            w_red_list_plot = []
+            act_red_list_plot = []
+            
+            for test, a, p, rmethod in zip(tests, act_red_list, are_pareto, test_rmethod):
                 # if p and test[3] >= min_acc:
                 if True:
                     f.write(
                         f'{test[3]:.2f}\t{test[4]:.2f}\t{a:.2f}\t{test[0]}\t{test[1]}\t{test[2]}\n')
+                    
+                    if rmethod == 'round_to_nearest':
+                        acc_list_plot.append(test[3])
+                        w_red_list_plot.append(test[4])
+                        act_red_list_plot.append(a)
+                    
+            fig, ax = plt.subplots(1,2, figsize=(6.4, 2.4), sharey=True)
+            
+            zipped = zip(w_red_list_plot, act_red_list_plot, acc_list_plot)
+            zipped = sorted(zipped)
+            w_red_list_plot, act_red_list_plot, acc_list_plot = zip(*zipped)
+            
+            cm_subsection = linspace(0., 1., len(acc_list_plot))
+            colors = [cm.jet(x) for x in cm_subsection]
+            
+            ax[0].scatter(w_red_list_plot, acc_list_plot, marker='o', color=colors)
+            ax[1].scatter(act_red_list_plot, acc_list_plot, marker='o', color=colors)
+            
+            ax[0].set_xlabel("W mem reduction")
+            ax[0].set_ylabel("Accuracy (%)")
+            ax[0].grid(True)
+            
+            ax[1].set_xlabel("A vol reduction")
+            ax[1].grid(True)
+            
+            fig.suptitle(f'{network} - {DATASET_TITLES[dataset]}')
+            
+            fig.savefig('figures/' +
+                        '_'.join([network, dataset]) + '_curve.' + args.pictures_format, bbox_inches='tight')
+                    
+                    
+            
+            
+                    
 
     f.close()
 
