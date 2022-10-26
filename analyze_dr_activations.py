@@ -104,6 +104,8 @@ def main():
 
     if args.model == "ShallowCapsNet":
 
+        plt.rcParams.update({'font.size': 14})
+
         #primary_presquash = model.primary.hist["pre_squash_0"]
         digits_pre_squash = []
         digits_pre_softmax = []
@@ -146,7 +148,7 @@ def main():
         print("pre_softmax v2")
         for i in range(0, 3):
             ax.hist(centroids_pre_softmax, bins=len(centroids_pre_softmax),
-                    weights=digits_pre_softmax[i]/(10000*1152*10), alpha=0.7, label=f'iteration {i+1}', zorder=-(i-2)*5)
+                    weights=digits_pre_softmax[i]/(10000*1152*10), alpha=0.7, label=f'iter{i+1}', zorder=-(i-2)*5)
 
         ax.set_yscale('log')
         ax.grid(True)
@@ -189,7 +191,7 @@ def main():
         print("pre_squash")
         for i in range(0, 3):
             ax.hist(centroids_pre_squash, bins=len(centroids_pre_squash),
-                    weights=digits_pre_squash[i]/(10000*10*16), alpha=0.7, label=f'iteration {i}', zorder=-(i-2)*5)
+                    weights=digits_pre_squash[i]/(10000*10*16), alpha=0.7, label=f'iter{i}', zorder=-(i-2)*5)
 
             # print(model.digit.max_values_dict[f"pre_squash_{i}"])
         ax.set_yscale('log')
