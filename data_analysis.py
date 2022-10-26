@@ -27,6 +27,20 @@ ACT_SIZES['DeepCaps'] = {'mnist': [784, 100352, 100352, 50176, 16384, 4096, 320]
                          'fashion-mnist': [784, 100352, 100352, 50176, 16384, 4096, 320],
                          'cifar10': [12288, 524288, 524288, 262144, 65536, 16384, 320]}
 
+SF = 'OPT'  # 'MAX', 'OPT'
+
+scaling_factors_dict = {}
+if SF == 'OPT':
+    scaling_factors_dict["ShallowCapsNet"] = {
+        'mnist': 6.0, 'fashion-mnist': 8.0}
+    scaling_factors_dict["DeepCaps"] = {
+        'mnist': 6.0, 'fashion-mnist': 8.0, 'cifar10': 8.0}
+elif SF == 'MAX':
+    scaling_factors_dict["ShallowCapsNet"] = {
+        'mnist': 10000.0, 'fashion-mnist': 10000.0}
+    scaling_factors_dict["DeepCaps"] = {
+        'mnist': 10000.0, 'fashion-mnist': 10000.0, 'cifar10': 10000.0}
+
 
 def analyze_file(filename):
     f = open(filename, "r")
@@ -97,9 +111,13 @@ def analyze_file(filename):
                 (tuple(wbits_1), tuple(actbits_1), tuple(drbits_1), acc_1, mem_red_1))
 
             if len(line) > 8:
+                print(tuple(wbits_1), tuple(actbits_1),
+                      tuple(drbits_1), acc_1, mem_red_1)
                 wbits_2, actbits_2, drbits_2, acc_2, mem_red_2 = line[8:]
                 data_dict[network][dataset][rmethod][scaling_factor].add(
                     (tuple(wbits_2), tuple(actbits_2), tuple(drbits_2), acc_2, mem_red_2))
+                print(tuple(wbits_2), tuple(actbits_2),
+                      tuple(drbits_2), acc_2, mem_red_2)
 
     f.close()
 
@@ -193,12 +211,6 @@ def data_analysis(args):
                     fig.savefig('figures/scaling_factors_analysis/' +
                                 '_'.join([network, dataset, rmethod]) + '.png')
 
-    scaling_factors_dict = {}
-    scaling_factors_dict["ShallowCapsNet"] = {
-        'mnist': 6.0, 'fashion-mnist': 8.0}
-    scaling_factors_dict["DeepCaps"] = {
-        'mnist': 6.0, 'fashion-mnist': 8.0, 'cifar10': 8.0}
-
     ##### QUANTIZATION METHODS ANALYSIS #####
     if args.quantization_method_analysis:
         for network in data_dict.keys():
@@ -246,10 +258,8 @@ def data_analysis(args):
             p_frontX, p_frontY, p_index = pareto_frontier(
                 x, y, maxX=True, maxY=True)
             ax.scatter(x, y, color=cm.jet(0))
-            ax.plot(p_frontX, p_frontY, color=cm.jet(1),
-                    label=rmethod)
+            ax.plot(p_frontX, p_frontY, color=cm.jet(1))
 
-            ax.legend()
             ax.grid(True)
             ax.set_title('_'.join([network, dataset]))
             ax.set_xlabel('Weight memory reduction')
@@ -278,7 +288,8 @@ def data_analysis(args):
             costs = [[t[3], t[4], a] for t, a in zip(tests, act_red_list)]
             are_pareto = pareto_frontier_3d(costs)
             for test, a, p in zip(tests, act_red_list, are_pareto):
-                if p and test[3] >= min_acc:
+                # if p and test[3] >= min_acc:
+                if True:
                     f.write(
                         f'{test[3]:.2f}\t{test[4]:.2f}\t{a:.2f}\t{test[0]}\t{test[1]}\t{test[2]}\n')
 
