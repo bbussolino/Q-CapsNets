@@ -1,5 +1,4 @@
 ShallowCapsNet	mnist	round_to_nearest
-ShallowCapsNet	mnist	round_to_nearest
 6	0.2	2	([16, 16, 16], [5, 7, 7], [5, 4], 99.51, 2.0)
 6	0.2	3	([10, 10, 10], [5, 7, 7], [5, 4], 99.49, 3.2)
 6	0.2	4	([8, 8, 8], [6, 6, 7], [6, 4], 99.51, 4.0)

@@ -17,14 +17,15 @@ from test_train_functions import *
 from full_precision_models import *
 from full_precision_decoders import *
 from utils import load_data
-from q_capsnets import qcapsnets
+from q_capsnets_v2 import qcapsnets
 
 
 def main():
     global args
 
     # Setting the hyper parameters
-    parser = argparse.ArgumentParser(description='Q-CapsNets framework', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description='Q-CapsNets framework', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     # Model parameters
     parser.add_argument('--model', type=str, default="ShallowCapsNet",
@@ -80,7 +81,7 @@ def main():
                         help="String with the name of the quantization method to use")
     parser.add_argument('--memory-budget', type=float, default=200,
                         help="Memory budget expressed in MB")
-    parser.add_argument('--std-multiplier', type=float, default=100, 
+    parser.add_argument('--std-multiplier', type=float, default=100,
                         help="Set to clamp scaling factor to [-std,std]*std_multiplier. default=100 (no clamping)")
 
     args = parser.parse_args()
@@ -90,7 +91,8 @@ def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = args.visible_gpus
 
     # Load data
-    train_loader, test_loader, num_channels, in_wh, num_classes = load_data(args)
+    train_loader, test_loader, num_channels, in_wh, num_classes = load_data(
+        args)
 
     # Build Capsule Network
     model_class = getattr(sys.modules[__name__], args.model)
@@ -99,11 +101,13 @@ def main():
 
     if args.no_training:
         # Load pre-trained weights
-        model.load_state_dict(torch.load(args.trained_weights_path))  # load pre-trained weights
+        # load pre-trained weights
+        model.load_state_dict(torch.load(args.trained_weights_path))
     else:
         # Build decoder
         decoder_class = getattr(sys.modules[__name__], args.decoder)
-        decoder = decoder_class(*args.decoder_args)  # build decoder for training
+        # build decoder for training
+        decoder = decoder_class(*args.decoder_args)
 
     # Move model to GPU if possible
     if torch.cuda.device_count() > 0:
@@ -123,13 +127,17 @@ def main():
     if not args.no_training:
         # TRAINING
         # Optimizer
-        optimizer = optim.Adam(chain(model.parameters(), decoder.parameters()), lr=args.lr)
+        optimizer = optim.Adam(
+            chain(model.parameters(), decoder.parameters()), lr=args.lr)
         # Learning rate scheduler
-        lambda_func = lambda step: args.decay_rate ** (step / args.decay_steps)
+
+        def lambda_func(
+            step): return args.decay_rate ** (step / args.decay_steps)
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lambda_func)
 
         if args.hard_training:
-            hard_list = [False] * math.ceil(args.epochs / 2) + [True] * math.floor(args.epochs / 2)
+            hard_list = [
+                False] * math.ceil(args.epochs / 2) + [True] * math.floor(args.epochs / 2)
         else:
             hard_list = [False] * args.epochs
 
@@ -137,14 +145,16 @@ def main():
         for epoch in range(1, args.epochs + 1):
             full_precision_training(model, decoder, num_classes, train_loader, optimizer, scheduler, epoch,
                                     hard_list[epoch - 1], args)
-            best_accuracy = full_precision_test(model, num_classes, test_loader, model_filename, best_accuracy, True)
+            best_accuracy = full_precision_test(
+                model, num_classes, test_loader, model_filename, best_accuracy, True)
 
         print('\n \n Best Full-Precision Accuracy: ' + str(best_accuracy) + '%')
 
     else:
         # PRE-TRAINED WEIGHTS EVALUATION
         best_accuracy = 0
-        best_accuracy = full_precision_test(model, num_classes, test_loader, model_filename, best_accuracy, False)
+        best_accuracy = full_precision_test(
+            model, num_classes, test_loader, model_filename, best_accuracy, False)
         print('\n \n Full-Precision Accuracy: ' + str(best_accuracy) + '%')
 
     if args.no_training:

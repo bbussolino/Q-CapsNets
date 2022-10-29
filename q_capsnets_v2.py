@@ -8,7 +8,7 @@ from utils import one_hot_encode, capsnet_testing_loss
 from torch.autograd import Variable
 from torch.backends import cudnn
 from quantization_methods import *
-from quantized_models import *
+from quantized_models_v2 import *
 
 
 def quantized_test(model, num_classes, data_loader, quantization_function, scaling_factors, quantization_bits,
@@ -108,11 +108,28 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
 
     # from sqnr, generate sorted list with name of weights
     # tuple name - sqnr
+    compressed_sqnrs = {}
+    if model == "DeepCaps":
+        for key, value in weights_scale_factors_original.items():
+            if "block" not in key and "weight" in key:
+                compressed_sqnrs[key] = value[2].item()
+            elif "block" in key and "weight" in key:
+                if (key.split('.')[0] + ".weight") not in compressed_sqnrs.keys():
+                    compressed_sqnrs[key.split(
+                        '.')[0] + ".weight"] = value[2].item()/4
+                else:
+                    compressed_sqnrs[key.split(
+                        '.')[0] + ".weight"] += value[2].item()/4
+    else:
+        for key, value in weights_scale_factors_original.items():
+            if "weight" in key and "batchnorm" not in key:
+                compressed_sqnrs[key] = value[2].item()
+
     sqnr_tuples = []
     i = 0
-    for key, value in weights_scale_factors_original.items():
+    for key, value in compressed_sqnrs.items():
         if "weight" in key and "batchnorm" not in key:
-            sqnr_tuples.append((key, value[2].item(), i))
+            sqnr_tuples.append((key, value, i))
             i += 1
     # sort list of tuples based on second element (sqnr)
     sqnr_tuples.sort(key=lambda tup: tup[1], reverse=True)
@@ -122,27 +139,27 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     act_info = torch.load(
         full_precision_filename[:-3]+'_a_info.pt', map_location=torch.device('cpu'))
     act_scale_factors = act_info["scaling_factors"].tolist()
+
     act_sqnr = []
+    bcnt = 0
+    bacc = 0
+    pos_cnt = 0
     for i, (key, value) in enumerate(act_info["sqnr"].items()):
-        act_sqnr.append((key, value, i))
-    act_sqnr.sort(key=lambda tup: tup[1], reverse=False)
-    if len(act_sqnr) > 4:
-        num_layer_per_sqnr_group = math.floor(len(act_sqnr) / 4)
-        act_sqnr_grouped_index = [[act_sqnr[i][2]
-                                   for i in range(0, num_layer_per_sqnr_group)]]
-        act_sqnr_grouped_index.append([act_sqnr[i][2] for i in range(
-            num_layer_per_sqnr_group, 2*num_layer_per_sqnr_group)])
-        act_sqnr_grouped_index.append([act_sqnr[i][2] for i in range(
-            2*num_layer_per_sqnr_group, 3*num_layer_per_sqnr_group)])
-        act_sqnr_grouped_index.append(
-            [act_sqnr[i][2] for i in range(3*num_layer_per_sqnr_group, len(act_sqnr))])
-    else:
-        act_sqnr_grouped_index = []
-        for i in range(len(act_sqnr)):
-            act_sqnr_grouped_index.append([act_sqnr[i][2]])
+        if "block" in key:
+            bcnt += 1
+            bacc += value/4
+            if bcnt == 4:
+                act_sqnr.append((key.split('.')[0], bacc, pos_cnt))
+                pos_cnt += 1
+                bacc = 0
+                bcnt = 0
+        else:
+            act_sqnr.append((key, value, pos_cnt))
+            pos_cnt += 1
+
+    act_sqnr.sort(key=lambda tup: tup[1], reverse=True)
 
     print(f'DEBUG act_sqnr {act_sqnr}')
-    print(f'DEBUG act_sqnr_grouped {act_sqnr_grouped_index}')
 
     # Move the model to GPU if available
     if torch.cuda.device_count() > 0:
@@ -223,20 +240,16 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
         step1_dr_bits_f = []      # list with the quantization bits for the dynamic routing
 
         #### QUANTIZE THE WEIGHTS #####
-        #leaf_children = []
-        #leaf_children_names = []
-        leaf_children, leaf_children_names = get_leaf_modules(
-            "", quantized_model_temp.named_children(), [], [])
-        for i, (name, children) in enumerate(zip(leaf_children_names, leaf_children)):
-            for p in children.named_parameters():
-                if "batchnorm" not in p[0]:
-                    with torch.no_grad():
-                        quantization_function_weights(p[1], weights_scale_factors['.'.join(
-                            [name[1:], p[0]])].item(), quantization_bits)
-        #################################
+        for c in quantized_model_temp.named_children():
             step1_act_bits_f.append(quantization_bits)
-            if children.capsule_layer and children.dynamic_routing:
-                step1_dr_bits_f.append(quantization_bits)
+            if c[1].capsule_layer:
+                if c[1].dynamic_routing:
+                    step1_dr_bits_f.append(quantization_bits)
+            for p in c[1].named_parameters():
+                if not "batchnorm" in p[0]:
+                    with torch.no_grad():
+                        quantization_function_weights(
+                            p[1], weights_scale_factors['.'.join([c[0], p[0]])].item(), quantization_bits)
 
         # test with quantized weights and activations
         acc_temp = quantized_test(quantized_model_temp, num_classes, data_loader,
@@ -286,13 +299,12 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     step1_weight_bits = []
     #leaf_children = []
     #leaf_children_names = []
-    leaf_children, leaf_children_names = get_leaf_modules(
-        "", model_quant_original.named_children(), [], [])
-    for i, (name, children) in enumerate(zip(leaf_children_names, leaf_children)):
+    for c in model_quant_original.children():
         step1_act_bits.append(step1_bits)
         step1_weight_bits.append(step1_bits)
-        if children.capsule_layer and children.dynamic_routing:
-            step1_dr_bits.append(step1_bits)
+        if c.capsule_layer:
+            if c.dynamic_routing:
+                step1_dr_bits.append(step1_bits)
 
     print("STEP 1 output: ")
     print("\t Weight bits: \t\t", step1_weight_bits)
@@ -305,12 +317,13 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     # compute the number of weights and biases of each layer/block
     print("STEP 2")
     number_of_weights_inlayers = []
-    for c in leaf_children:
+    for c in model_quant_original.named_children():
         param_intra_layer = 0
-        for p in c.parameters():
+        for p in c[1].parameters():
             param_intra_layer = param_intra_layer + p.numel()
         number_of_weights_inlayers.append(param_intra_layer)
-    number_of_blocks = len(number_of_weights_inlayers)
+
+    print(number_of_weights_inlayers)
 
     memory_budget_bits = memory_budget * 8 * 2**20      # From MB to bits
     minimum_mem_required = np.sum(number_of_weights_inlayers)
@@ -337,10 +350,7 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     group2_params = 0
 
     for i, l in enumerate(sqnr_tuples):
-        num_params = 0
-        for p in leaf_children[l[2]].named_parameters():
-            if 'batchnorm' not in p[0]:
-                num_params += p[1].numel()
+        num_params = number_of_weights_inlayers[l[2]]
 
         if i < wgroup_size:
             group0_params += num_params
@@ -366,16 +376,13 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
 
     # Quantized the weights
     model_memory = copy.deepcopy(model_quant_original)
-    #leaf_children = []
-    #leaf_children_names = []
-    leaf_children, leaf_children_names = get_leaf_modules(
-        "", model_memory.named_children(), [], [])
-    for i, (name, children) in enumerate(zip(leaf_children_names, leaf_children)):
-        for p in children.named_parameters():
-            if "batchnorm" not in p[0]:
+
+    for i, c in enumerate(model_memory.named_children()):
+        for p in c[1].named_parameters():
+            if not "batchnorm" in p[0]:
                 with torch.no_grad():
-                    quantization_function_weights(p[1], weights_scale_factors['.'.join(
-                        [name[1:], p[0]])].item(), step2_weight_bits[i])
+                    quantization_function_weights(
+                        p[1], weights_scale_factors['.'.join([c[0], p[0]])].item(), step2_weight_bits[i])
 
     step2_acc = quantized_test(model_memory, num_classes, data_loader,
                                quantization_function_activations, act_scale_factors, step2_act_bits, step2_dr_bits)
@@ -395,16 +402,13 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
             step2_weight_bits = [step2_weight_bits[i] +
                                  1 for i in range(len(step2_weight_bits))]
             model_step2 = copy.deepcopy(model_quant_original)
-            #leaf_children = []
-            #leaf_children_names = []
-            leaf_children, leaf_children_names = get_leaf_modules(
-                "", model_step2.named_children(), [], [])
-            for i, (name, children) in enumerate(zip(leaf_children_names, leaf_children)):
-                for p in children.named_parameters():
-                    if "batchnorm" not in p[0]:
+
+            for i, c in enumerate(model_step2.named_children()):
+                for p in c[1].named_parameters():
+                    if not "batchnorm" in p[0]:
                         with torch.no_grad():
-                            quantization_function_weights(p[1], weights_scale_factors['.'.join(
-                                [name[1:], p[0]])].item(), step2_weight_bits[i])
+                            quantization_function_weights(
+                                p[1], weights_scale_factors['.'.join([c[0], p[0]])].item(), step2_weight_bits[i])
 
             step2_acc = quantized_test(model_step2, num_classes, data_loader,
                                        quantization_function_activations, act_scale_factors, step2_act_bits, step2_dr_bits)
@@ -417,17 +421,13 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
                 # BWl -= 1
                 step2_weight_bits[l[2]] -= 1
                 model_step2 = copy.deepcopy(model_quant_original)
-                #leaf_children = []
-                #leaf_children_names = []
-                leaf_children, leaf_children_names = get_leaf_modules(
-                    "", model_step2.named_children(), [], [])
-                for i, (name, children) in enumerate(zip(leaf_children_names, leaf_children)):
-                    for p in children.named_parameters():
-                        if "batchnorm" not in p[0]:
+                for i, c in enumerate(model_step2.named_children()):
+                    for p in c[1].named_parameters():
+                        if not "batchnorm" in p[0]:
                             with torch.no_grad():
-                                #print(f"Quantize {p[0]} with {step2_weight_bits[i]}")
-                                quantization_function_weights(p[1], weights_scale_factors['.'.join(
-                                    [name[1:], p[0]])].item(), step2_weight_bits[i])
+                                quantization_function_weights(
+                                    p[1], weights_scale_factors['.'.join([c[0], p[0]])].item(), step2_weight_bits[i])
+
                 prev_step2_acc = step2_acc
                 step2_acc = quantized_test(model_step2, num_classes, data_loader,
                                            quantization_function_activations, act_scale_factors, step2_act_bits, step2_dr_bits)
@@ -463,18 +463,15 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
         wmem_reduction_mem = tot_memory_b / final_weight_memory_b
         print(f"Model_memory weight mem reduction: {wmem_reduction_mem:.2f}x")
         print("\n")
+
         # MODEL ACCURACY
         model_step2 = copy.deepcopy(model_quant_original)
-        #leaf_children = []
-        #leaf_children_names = []
-        leaf_children, leaf_children_names = get_leaf_modules(
-            "", model_step2.named_children(), [], [])
-        for i, (name, children) in enumerate(zip(leaf_children_names, leaf_children)):
-            for p in children.named_parameters():
-                if "batchnorm" not in p[0]:
+        for i, c in enumerate(model_step2.named_children()):
+            for p in c[1].named_parameters():
+                if not "batchnorm" in p[0]:
                     with torch.no_grad():
-                        quantization_function_weights(p[1], weights_scale_factors['.'.join(
-                            [name[1:], p[0]])].item(), step2_weight_bits[i])
+                        quantization_function_weights(
+                            p[1], weights_scale_factors['.'.join([c[0], p[0]])].item(), step2_weight_bits[i])
 
         model_accuracy_acc = quantized_test(model_step2, num_classes, data_loader,
                                             quantization_function_activations, act_scale_factors, step2_act_bits, step2_dr_bits)
@@ -508,14 +505,17 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     branchA_accuracy_budget = step2_acc - minimum_accuracy
     step3a_accuracy_budget = branchA_accuracy_budget * 55 / 100
     step3a_accuracy_budget_per_step = step3a_accuracy_budget / \
-        len(act_sqnr_grouped_index)
+        len(step2_act_bits)
     step3A_min_acc = step2_acc
 
     # STEP 3A  - layer-wise quantization of activations
     print("STEP 3A")
     # get the position of the layers that use dynamic routing bits
+
+    model_step2 = copy.deepcopy(model_quant_original)
+
     dynamic_routing_bits_bool = []
-    for c in leaf_children:
+    for c in model_step2.children():
         if c.capsule_layer and c.dynamic_routing:
             dynamic_routing_bits_bool.append(True)
         else:
@@ -527,39 +527,30 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     step3a_act_bits = copy.deepcopy(step2_act_bits)
     step3a_dr_bits = copy.deepcopy(step2_dr_bits)
 
-    model_step2 = copy.deepcopy(model_quant_original)
-    #leaf_children = []
-    #leaf_children_names = []
-    leaf_children, leaf_children_names = get_leaf_modules(
-        "", model_step2.named_children(), [], [])
-    for i, (name, children) in enumerate(zip(leaf_children_names, leaf_children)):
-        for p in children.named_parameters():
-            if "batchnorm" not in p[0]:
+    for i, c in enumerate(model_step2.named_children()):
+        for p in c[1].named_parameters():
+            if not "batchnorm" in p[0]:
                 with torch.no_grad():
-                    quantization_function_weights(p[1], weights_scale_factors['.'.join(
-                        [name[1:], p[0]])].item(), step3a_weight_bits[i])
+                    quantization_function_weights(
+                        p[1], weights_scale_factors['.'.join([c[0], p[0]])].item(), step3a_weight_bits[i])
 
     step3a_acc = step2_acc
 
-    start_bits = step3a_act_bits[0]
-    for l in range(0, len(act_sqnr_grouped_index)):
-        curr_bits = start_bits
+    for l in act_sqnr:
         step3A_min_acc -= step3a_accuracy_budget_per_step
         while True:
             if step3a_acc >= step3A_min_acc:
-                if curr_bits < 3:
+                if step3a_act_bits[l[2]] < 3:
                     break
-                for i in range(len(act_sqnr_grouped_index[l])):
-                    step3a_act_bits[act_sqnr_grouped_index[l][i]] -= 1
-                    curr_bits = step3a_act_bits[act_sqnr_grouped_index[l][i]]
+                step3a_act_bits[l[2]] -= 1
+
                 step3a_acc_prev = step3a_acc
                 step3a_acc = quantized_test(model_step2, num_classes, data_loader,
                                             quantization_function_activations, act_scale_factors, step3a_act_bits, step3a_dr_bits)
                 print(step3a_weight_bits, step3a_act_bits,
                       step3a_dr_bits, step3a_acc)
             else:
-                for i in range(len(act_sqnr_grouped_index[l])):
-                    step3a_act_bits[act_sqnr_grouped_index[l][i]] += 1
+                step3a_act_bits[l[2]] += 1
                 step3a_acc = step3a_acc_prev
                 break
 
@@ -583,7 +574,7 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     # need to variate only the bits of the layers in which the dynamic routing is actually performed
     # (iterations > 1)
     dynamic_routing_quantization = []
-    for c in leaf_children:
+    for c in model_step2.children():
         if c.capsule_layer and c.dynamic_routing:
             dynamic_routing_quantization.append(True)
     dr_quantization_pos = [pos for pos, val in enumerate(
