@@ -27,7 +27,8 @@ ACT_SIZES['DeepCaps'] = {'mnist': [784, 100352, 100352, 50176, 16384, 4096, 320]
                          'fashion-mnist': [784, 100352, 100352, 50176, 16384, 4096, 320],
                          'cifar10': [12288, 524288, 524288, 262144, 65536, 16384, 320]}
 
-DATASET_TITLES = {'mnist': 'MNIST', 'fashion-mnist': 'FMNIST', 'cifar10': 'CIFAR10'}
+DATASET_TITLES = {'mnist': 'MNIST',
+                  'fashion-mnist': 'FMNIST', 'cifar10': 'CIFAR10'}
 
 SF = 'MAX'  # 'MAX', 'OPT'
 
@@ -109,17 +110,15 @@ def analyze_file(filename):
             if scaling_factor not in data_dict[network][dataset][rmethod].keys():
                 data_dict[network][dataset][rmethod][scaling_factor] = set()
 
-            data_dict[network][dataset][rmethod][scaling_factor].add(
-                (tuple(wbits_1), tuple(actbits_1), tuple(drbits_1), acc_1, mem_red_1))
-
             if len(line) > 8:
-                print(tuple(wbits_1), tuple(actbits_1),
-                      tuple(drbits_1), acc_1, mem_red_1)
+                data_dict[network][dataset][rmethod][scaling_factor].add(
+                    (tuple(wbits_1), tuple(actbits_1), tuple(drbits_1), acc_1, mem_red_1, False))
                 wbits_2, actbits_2, drbits_2, acc_2, mem_red_2 = line[8:]
                 data_dict[network][dataset][rmethod][scaling_factor].add(
-                    (tuple(wbits_2), tuple(actbits_2), tuple(drbits_2), acc_2, mem_red_2))
-                print(tuple(wbits_2), tuple(actbits_2),
-                      tuple(drbits_2), acc_2, mem_red_2)
+                    (tuple(wbits_2), tuple(actbits_2), tuple(drbits_2), acc_2, mem_red_2, False))
+            else:
+                data_dict[network][dataset][rmethod][scaling_factor].add(
+                    (tuple(wbits_1), tuple(actbits_1), tuple(drbits_1), acc_1, mem_red_1, True))
 
     f.close()
 
@@ -211,7 +210,7 @@ def data_analysis(args):
                     ax.set_ylabel('Accuracy')
 
                     fig.savefig('figures/scaling_factors_analysis/' +
-                                '_'.join([network, dataset, rmethod])+ '.' + args.pictures_format)
+                                '_'.join([network, dataset, rmethod]) + '.' + args.pictures_format)
 
     ##### QUANTIZATION METHODS ANALYSIS #####
     if args.quantization_method_analysis:
@@ -222,7 +221,7 @@ def data_analysis(args):
                     data_dict[network][dataset].keys())
                 cm_subsection = linspace(0., 1., number_of_qmethods)
                 colors = [cm.jet(x) for x in cm_subsection]
-                #for i, rmethod in enumerate(data_dict[network][dataset].keys()):
+                # for i, rmethod in enumerate(data_dict[network][dataset].keys()):
                 for i, rmethod in enumerate(["round_to_nearest", "stochastic_rounding", "truncation"]):
                     curr_scaling_factor = scaling_factors_dict[network][dataset]
                     x, y = [], []
@@ -231,8 +230,9 @@ def data_analysis(args):
                         y.append(test[3])
                     p_frontX, p_frontY, _ = pareto_frontier(
                         x, y, maxX=True, maxY=True)
-                    ax.scatter(x, y)#, color=colors[i])
-                    ax.plot(p_frontX, p_frontY, label=rmethod) #, color=colors[i])
+                    ax.scatter(x, y)  # , color=colors[i])
+                    # , color=colors[i])
+                    ax.plot(p_frontX, p_frontY, label=rmethod)
 
                 ax.legend()
                 ax.grid(True)
@@ -247,17 +247,22 @@ def data_analysis(args):
     # merge di tutti i rounding methods insieme - plot
     # pareto
     f = open(args.output_file, 'w+')
+    f2 = open(args.output_file[:-4]+'_rtne'+args.output_file[-4:], "w+")
+    f3 = open(args.output_file[:-4] +
+              '_rtne_satisfied'+args.output_file[-4:], "w+")
+
     for network in data_dict.keys():
         for dataset in data_dict[network].keys():
             fig, ax = plt.subplots()
             curr_scaling_factor = scaling_factors_dict[network][dataset]
-            x, y, tests, test_rmethod = [], [], [], []
+            x, y, tests, test_rmethod, satisfied = [], [], [], [], []
             for i, rmethod in enumerate(data_dict[network][dataset].keys()):
                 for test in data_dict[network][dataset][rmethod][curr_scaling_factor]:
                     x.append(test[4])
                     y.append(test[3])
                     tests.append(test)
                     test_rmethod.append(rmethod)
+                    satisfied.append(test[5])
             p_frontX, p_frontY, p_index = pareto_frontier(
                 x, y, maxX=True, maxY=True)
             ax.scatter(x, y, color=cm.jet(0))
@@ -269,9 +274,11 @@ def data_analysis(args):
             ax.set_ylabel('Accuracy')
 
             fig.savefig('figures/' +
-                        '_'.join([network, dataset])+ '.' + args.pictures_format)
+                        '_'.join([network, dataset]) + '.' + args.pictures_format)
 
             f.write(f'{network}, {dataset}\n')
+            f2.write(f'{network}, {dataset}\n')
+            f3.write(f'{network}, {dataset}\n')
             max_acc = 0
             for test in tests:
                 max_acc = max(max_acc, test[3])
@@ -290,52 +297,57 @@ def data_analysis(args):
             # test: w_bits, a_bits, dr_bits, acc, w_red, a_red
             costs = [[t[3], t[4], a] for t, a in zip(tests, act_red_list)]
             are_pareto = pareto_frontier_3d(costs)
-            
+
             acc_list_plot = []
             w_red_list_plot = []
             act_red_list_plot = []
-            
-            for test, a, p, rmethod in zip(tests, act_red_list, are_pareto, test_rmethod):
+
+            for test, a, p, rmethod, s in zip(tests, act_red_list, are_pareto, test_rmethod, satisfied):
                 # if p and test[3] >= min_acc:
                 if True:
                     f.write(
                         f'{test[3]:.2f}\t{test[4]:.2f}\t{a:.2f}\t{test[0]}\t{test[1]}\t{test[2]}\n')
-                    
+
                     if rmethod == 'round_to_nearest':
+                        f2.write(
+                            f'{test[3]:.2f}\t{test[4]:.2f}\t{a:.2f}\t{test[0]}\t{test[1]}\t{test[2]}\n')
+                        if s:
+                            f3.write(
+                                f'{test[3]:.2f}\t{test[4]:.2f}\t{a:.2f}\t{test[0]}\t{test[1]}\t{test[2]}\n')
                         acc_list_plot.append(test[3])
                         w_red_list_plot.append(test[4])
                         act_red_list_plot.append(a)
-                    
-            fig, ax = plt.subplots(1,2, figsize=(6.4, 2.4), sharey=True)
-            
+
+            fig, ax = plt.subplots(1, 2, figsize=(6.4, 1.8), sharey=True)
+
             zipped = zip(w_red_list_plot, act_red_list_plot, acc_list_plot)
             zipped = sorted(zipped)
             w_red_list_plot, act_red_list_plot, acc_list_plot = zip(*zipped)
-            
+
             cm_subsection = linspace(0., 1., len(acc_list_plot))
             colors = [cm.jet(x) for x in cm_subsection]
-            
-            ax[0].scatter(w_red_list_plot, acc_list_plot, marker='o', color=colors)
-            ax[1].scatter(act_red_list_plot, acc_list_plot, marker='o', color=colors)
-            
+
+            ax[0].scatter(w_red_list_plot, acc_list_plot,
+                          marker='o', color=colors)
+            ax[1].scatter(act_red_list_plot, acc_list_plot,
+                          marker='o', color=colors)
+
             ax[0].set_xlabel("W mem reduction")
             ax[0].set_ylabel("Accuracy (%)")
             ax[0].grid(True)
-            
+
             ax[1].set_xlabel("A vol reduction")
             ax[1].grid(True)
-            
-            fig.suptitle(f'{network} - {DATASET_TITLES[dataset]}')
-            
+
+            fig.suptitle(
+                f'{network.replace("Net", "")} - {DATASET_TITLES[dataset]}')
+
             fig.savefig('figures/' +
                         '_'.join([network, dataset]) + '_curve.' + args.pictures_format, bbox_inches='tight')
-                    
-                    
-            
-            
-                    
 
     f.close()
+    f2.close()
+    f3.close()
 
 
 def main():
