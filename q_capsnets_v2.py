@@ -588,6 +588,7 @@ def qcapsnets(model, model_parameters, full_precision_filename, num_classes, dat
     step4a_accuracy_budget_per_step = step4a_accuracy_budget / \
         len(dr_quantization_bits)
     step4a_min_acc = step4a_acc
+
     for l in range(0, len(dr_quantization_bits)):
         step4a_min_acc -= step4a_accuracy_budget_per_step
         while True:

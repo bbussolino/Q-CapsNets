@@ -110,17 +110,15 @@ def analyze_file(filename):
             if scaling_factor not in data_dict[network][dataset][rmethod].keys():
                 data_dict[network][dataset][rmethod][scaling_factor] = set()
 
-            data_dict[network][dataset][rmethod][scaling_factor].add(
-                (tuple(wbits_1), tuple(actbits_1), tuple(drbits_1), acc_1, mem_red_1))
-
             if len(line) > 8:
-                print(tuple(wbits_1), tuple(actbits_1),
-                      tuple(drbits_1), acc_1, mem_red_1)
+                data_dict[network][dataset][rmethod][scaling_factor].add(
+                    (tuple(wbits_1), tuple(actbits_1), tuple(drbits_1), acc_1, mem_red_1, False))
                 wbits_2, actbits_2, drbits_2, acc_2, mem_red_2 = line[8:]
                 data_dict[network][dataset][rmethod][scaling_factor].add(
-                    (tuple(wbits_2), tuple(actbits_2), tuple(drbits_2), acc_2, mem_red_2))
-                print(tuple(wbits_2), tuple(actbits_2),
-                      tuple(drbits_2), acc_2, mem_red_2)
+                    (tuple(wbits_2), tuple(actbits_2), tuple(drbits_2), acc_2, mem_red_2, False))
+            else:
+                data_dict[network][dataset][rmethod][scaling_factor].add(
+                    (tuple(wbits_1), tuple(actbits_1), tuple(drbits_1), acc_1, mem_red_1, True))
 
     f.close()
 
@@ -249,17 +247,20 @@ def data_analysis(args):
     # merge di tutti i rounding methods insieme - plot
     # pareto
     f = open(args.output_file, 'w+')
+    f2 = open(args.output_file[:-4]+'_satisfied'+args.output_file[-4:], "w+")
+
     for network in data_dict.keys():
         for dataset in data_dict[network].keys():
             fig, ax = plt.subplots()
             curr_scaling_factor = scaling_factors_dict[network][dataset]
-            x, y, tests, test_rmethod = [], [], [], []
+            x, y, tests, test_rmethod, satisfied = [], [], [], [], []
             for i, rmethod in enumerate(data_dict[network][dataset].keys()):
                 for test in data_dict[network][dataset][rmethod][curr_scaling_factor]:
                     x.append(test[4])
                     y.append(test[3])
                     tests.append(test)
                     test_rmethod.append(rmethod)
+                    satisfied.append(test[5])
             p_frontX, p_frontY, p_index = pareto_frontier(
                 x, y, maxX=True, maxY=True)
             ax.scatter(x, y, color=cm.jet(0))
@@ -274,6 +275,7 @@ def data_analysis(args):
                         '_'.join([network, dataset]) + '.' + args.pictures_format)
 
             f.write(f'{network}, {dataset}\n')
+            f2.write(f'{network}, {dataset}\n')
             max_acc = 0
             for test in tests:
                 max_acc = max(max_acc, test[3])
@@ -297,7 +299,7 @@ def data_analysis(args):
             w_red_list_plot = []
             act_red_list_plot = []
 
-            for test, a, p, rmethod in zip(tests, act_red_list, are_pareto, test_rmethod):
+            for test, a, p, rmethod, s in zip(tests, act_red_list, are_pareto, test_rmethod, satisfied):
                 # if p and test[3] >= min_acc:
                 if True:
                     f.write(
@@ -307,6 +309,10 @@ def data_analysis(args):
                         acc_list_plot.append(test[3])
                         w_red_list_plot.append(test[4])
                         act_red_list_plot.append(a)
+
+                    if s:
+                        f2.write(
+                            f'{test[3]:.2f}\t{test[4]:.2f}\t{a:.2f}\t{test[0]}\t{test[1]}\t{test[2]}\n')
 
             fig, ax = plt.subplots(1, 2, figsize=(6.4, 2.4), sharey=True)
 
@@ -335,6 +341,7 @@ def data_analysis(args):
                         '_'.join([network, dataset]) + '_curve.' + args.pictures_format, bbox_inches='tight')
 
     f.close()
+    f2.close()
 
 
 def main():
