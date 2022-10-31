@@ -66,34 +66,28 @@ def main():
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.visible_gpus
 
-    # for network - dataset combination   [5 combinations]
-    # for rounding method [round_to_nearest, stochastic_rounding, truncation]
-    # for scaling-factor    [8, 7, 6, 5, 4]  [5 combinations]
-    # for accuracy-tolerance [0.2, 0.5, 1]  [3 combinations]
-    # for memory budget     red [2, 3, 4, 5, 6, 7, 8, 10]  [8 combinations]
     model_dataset_combinations = []
     # model_dataset_combinations.append(["ShallowCapsNet", [20, 1, 10, 16], "FCDecoder", [
     #                                  16, 784], "mnist", "./trained_models/ShallowCapsNet_mnist_top.pt", 25.96])
     # model_dataset_combinations.append(["ShallowCapsNet", [20, 1, 10, 16], "FCDecoder", [
     #                                  16, 784], "fashion-mnist", "./trained_models/ShallowCapsNet_fashionmnist_top.pt", 25.96])
-    # model_dataset_combinations.append(["DeepCaps", [28, 1, 10, 32], "ConvDecoder28", [
-    #                                  32, 1], "mnist", "./trained_models/DeepCaps_mnist_top.pt", 32.2])
+    model_dataset_combinations.append(["DeepCaps", [28, 1, 10, 32], "ConvDecoder28", [
+                                      32, 1], "mnist", "./trained_models/DeepCaps_mnist_top.pt", 32.2])
     # model_dataset_combinations.append(["DeepCaps", [28, 1, 10, 32], "ConvDecoder28", [
     #                                  32, 1], "fashion-mnist", "./trained_models/DeepCaps_fashionmnist_top.pt", 32.2])
-    model_dataset_combinations.append(["DeepCaps", [64, 3, 10, 32], "ConvDecoder64", [
-                                      32, 3], "cifar10", "./trained_models/DeepCaps_cifar10_top.pt", 50.98])
+    # model_dataset_combinations.append(["DeepCaps", [64, 3, 10, 32], "ConvDecoder64", [
+    #                                  32, 3], "cifar10", "./trained_models/DeepCaps_cifar10_top.pt", 50.98])
 
-    possible_std_multipliers = [10000, 8, 7, 6]  # , 5]
+    possible_std_multipliers = [10000]  # , 8, 7, 6]  # , 5]
     possible_acc_tolerance = [0.2, 0.5, 1]
-    possible_mem_budget_reduction = [2, 3, 4, 5, 6, 7, 8, 10]
-    # ["round_to_nearest", "stochastic_rounding"] #,
-    possible_roundings = ["stochastic_rounding"]  # "truncation",
-    # "round_to_nearest", "stochastic_rounding"]
+    possible_mem_budget_reduction = [11, 12, 13]
+    possible_roundings = ["round_to_nearest",
+                          "stochastic_rounding", "truncation"]
 
-    f = open("multiple_tests_correctdeepcaps.txt", "a+")
+    f = open("multiple_tests_corrected.txt", "a+")
 
-    for model_dataset_info in model_dataset_combinations:
-        for rounding in possible_roundings:
+    for rounding in possible_roundings:
+        for model_dataset_info in model_dataset_combinations:
             f.write(
                 f"{model_dataset_info[0]}\t{model_dataset_info[4]}\t{rounding}\n")
             for std_multiplier in possible_std_multipliers:
